@@ -8,7 +8,7 @@
     <div class="row q-col-gutter-lg justify-center">
       <!-- Zone picker -->
       <div class="col-12 col-md-6">
-        <q-card flat bordered>
+        <q-card flat>
           <q-card-section class="row items-center q-py-sm q-gutter-x-sm">
             <q-icon name="my_location" color="primary" size="22px" />
             <div class="text-subtitle1 text-weight-medium">Safe zone center</div>
@@ -24,7 +24,7 @@
             />
           </q-card-section>
 
-          <q-banner v-if="!picked" class="bg-dark text-grey-4" dense>
+          <q-banner v-if="!picked" class="pick-hint" dense rounded>
             Tap the map or press “Use my GPS” to place the zone center ({{
               settings.initialZoneRadius
             }}
@@ -45,9 +45,9 @@
 
       <!-- Settings + identity -->
       <div class="col-12 col-md-6">
-        <q-card flat bordered class="q-mb-lg">
+        <q-card flat class="q-mb-lg">
           <q-card-section class="q-gutter-y-md">
-            <q-input v-model="playerName" dark outlined label="Your name" maxlength="24" counter>
+            <q-input v-model="playerName" dark filled label="Your name" maxlength="24" counter>
               <template #prepend>
                 <q-icon name="person" />
               </template>
@@ -170,5 +170,14 @@ onBeforeUnmount(() => {
 .map-holder {
   height: 46vh;
   min-height: 300px;
+  border-radius: var(--mm-radius, 20px);
+  overflow: hidden;
+}
+
+.pick-hint {
+  background: rgba(0, 230, 118, 0.1);
+  color: #9fe8c2;
+  border-radius: var(--mm-radius-sm, 14px);
+  margin: 0 12px 8px;
 }
 </style>

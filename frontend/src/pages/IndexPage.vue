@@ -5,12 +5,12 @@
       <div class="text-subtitle1 text-grey-5">Real-time outdoor hide &amp; seek · GPS required</div>
     </div>
 
-    <q-card class="col-shrink action-card" flat bordered>
+    <q-card class="col-shrink action-card" flat>
       <q-card-section class="q-gutter-y-md">
         <q-input
           v-model="playerName"
           dark
-          outlined
+          filled
           label="Your name"
           maxlength="24"
           counter
@@ -68,7 +68,7 @@
     </q-card>
 
     <q-dialog v-model="joinOpen" persistent>
-      <q-card style="min-width: 320px" dark>
+      <q-card dark class="join-card">
         <q-card-section>
           <div class="text-h6">Join a room</div>
         </q-card-section>
@@ -76,7 +76,7 @@
           <q-input
             v-model="joinCode"
             dark
-            outlined
+            filled
             label="Room code"
             maxlength="4"
             class="code-input"
@@ -201,6 +201,10 @@ onBeforeUnmount(() => {
 .action-card {
   width: 100%;
   max-width: 420px;
+}
+
+.join-card {
+  width: min(92vw, 360px);
 }
 
 .code-input :deep(input) {

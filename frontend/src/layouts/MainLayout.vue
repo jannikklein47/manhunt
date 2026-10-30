@@ -12,6 +12,6 @@
 
 <style scoped>
 .app-layout {
-  background: #121212;
+  background: var(--mm-bg, #101413);
 }
 </style>

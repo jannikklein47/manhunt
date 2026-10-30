@@ -1,7 +1,7 @@
 <template>
-  <q-page class="column q-pb-lg">
+  <q-page class="room-page column">
     <!-- Room header -->
-    <q-toolbar class="q-px-none">
+    <q-toolbar class="room-toolbar">
       <q-btn flat round dense icon="logout" @click="leave">
         <q-tooltip>Leave room</q-tooltip>
       </q-btn>
@@ -10,7 +10,7 @@
         <q-btn flat round dense size="sm" icon="content_copy" @click="copyCode">
           <q-tooltip>Copy code &amp; link</q-tooltip>
         </q-btn>
-        <q-chip :color="statusColor" text-white dense>{{ statusLabel }}</q-chip>
+        <span class="status-pill" :class="`status-pill--${status}`">{{ statusLabel }}</span>
       </q-toolbar-title>
       <q-icon
         :name="store.connected ? 'wifi' : 'wifi_off'"
@@ -21,32 +21,38 @@
       </q-icon>
     </q-toolbar>
 
-    <!-- HUD -->
-    <div v-if="status === 'active'" class="row q-col-gutter-sm q-mb-sm">
-      <q-chip v-if="isHiding" outline color="amber-7" icon="hourglass_top" class="hud-chip">
-        Hide: {{ formatClock(tick?.hideRemaining ?? 0) }}
-      </q-chip>
-      <q-chip outline :color="isHiding ? 'grey-6' : 'white'" icon="timer" class="hud-chip">
+    <!-- HUD: single thumb-scrollable row of flat chips -->
+    <div v-if="status === 'active'" class="hud-row no-scrollbar">
+      <span v-if="isHiding" class="hud-chip hud-chip--amber">
+        <q-icon name="hourglass_top" size="14px" />
+        Hide {{ formatClock(tick?.hideRemaining ?? 0) }}
+      </span>
+      <span class="hud-chip">
+        <q-icon name="timer" size="14px" />
         {{ formatClock(tick?.timeRemaining ?? 0) }}
-      </q-chip>
-      <q-chip v-if="!isHiding" outline color="green-5" icon="adjust" class="hud-chip">
+      </span>
+      <span v-if="!isHiding" class="hud-chip hud-chip--green">
+        <q-icon name="adjust" size="14px" />
         Zone {{ Math.round(zoneRadius) }} m
-      </q-chip>
-      <q-chip v-if="!isHiding" outline color="orange-5" icon="compress" class="hud-chip">
+      </span>
+      <span v-if="!isHiding" class="hud-chip hud-chip--orange">
+        <q-icon name="compress" size="14px" />
         Shrink in {{ tick?.nextShrinkIn ?? '–' }} s
-      </q-chip>
-      <q-chip v-if="!isHiding" outline color="purple-4" icon="visibility" class="hud-chip">
+      </span>
+      <span v-if="!isHiding" class="hud-chip hud-chip--purple">
+        <q-icon name="visibility" size="14px" />
         {{ amHunter ? 'Reveal in' : 'Spotted in' }} {{ nextRevealIn }} s
-      </q-chip>
-      <q-chip outline :color="gpsChipColor" icon="gps_fixed" class="hud-chip">
+      </span>
+      <span class="hud-chip" :class="gpsChipClass">
+        <q-icon name="gps_fixed" size="14px" />
         {{ gpsChipLabel }}
-      </q-chip>
+      </span>
     </div>
 
     <!-- Hiding phase banner -->
     <q-banner
       v-if="status === 'active' && isHiding && !me?.captured"
-      class="bg-amber-8 text-black q-mb-sm"
+      class="banner banner--amber q-mb-sm"
       rounded
     >
       <template #avatar>
@@ -64,7 +70,7 @@
     <!-- Proximity alert banner (hiders) -->
     <q-banner
       v-if="status === 'active' && amHider && !me?.captured && store.proximity.inRange"
-      class="bg-negative text-white q-mb-sm proximity-banner"
+      class="banner banner--red q-mb-sm proximity-banner"
       rounded
     >
       <template #avatar>
@@ -74,7 +80,7 @@
     </q-banner>
 
     <!-- Captured banner -->
-    <q-banner v-if="me?.captured" class="bg-dark text-grey-3 q-mb-sm" rounded>
+    <q-banner v-if="me?.captured" class="banner banner--grey q-mb-sm" rounded>
       <template #avatar>
         <q-icon name="sports_score" color="negative" />
       </template>
@@ -105,49 +111,52 @@
         @locate="store.setManualLocation"
       />
 
-      <!-- Manual location (testing tool) — off by default -->
-      <div class="map-overlay-panel">
-        <q-icon name="science" size="16px" color="grey-5">
-          <q-tooltip>Testing tools</q-tooltip>
-        </q-icon>
-        <q-toggle
-          v-model="manualEnabledProxy"
-          dense
-          dark
-          size="sm"
-          label="Manual location"
-          left-label
-        >
-          <q-tooltip
-            >Testing only: replaces your GPS with tap-the-map positioning. Off by default — disable
-            it before a real game.</q-tooltip
-          >
-        </q-toggle>
-        <q-btn-toggle
-          v-if="manualEnabledProxy"
-          v-model="manualModeProxy"
-          dense
-          no-caps
-          unelevated
-          toggle-color="primary"
-          :options="[
-            { label: 'GPS', value: false, icon: 'gps_fixed' },
-            { label: 'Manual', value: true, icon: 'touch_app' },
-          ]"
-        />
-      </div>
+      <!-- Map overlay panels: stacked, so they can never overlap -->
+      <div class="map-overlay-stack">
+        <!-- Host, lobby only: re-place the zone center on the map -->
+        <div v-if="canPickZone" class="map-overlay-panel">
+          <q-icon name="my_location" size="16px" color="grey-5">
+            <q-tooltip>Move the zone center</q-tooltip>
+          </q-icon>
+          <q-toggle v-model="zonePickArmed" dense dark size="sm" label="Move zone" left-label>
+            <q-tooltip
+              >Lobby only: tap the map to move the zone center for everyone; drag the ◎ marker to
+              fine-tune.</q-tooltip
+            >
+          </q-toggle>
+        </div>
 
-      <!-- Host, lobby only: re-place the zone center on the map -->
-      <div v-if="canPickZone" class="map-overlay-panel">
-        <q-icon name="my_location" size="16px" color="grey-5">
-          <q-tooltip>Move the zone center</q-tooltip>
-        </q-icon>
-        <q-toggle v-model="zonePickArmed" dense dark size="sm" label="Move zone" left-label>
-          <q-tooltip
-            >Lobby only: tap the map to move the zone center for everyone; drag the ◎ marker to
-            fine-tune.</q-tooltip
+        <!-- Manual location (testing tool) — off by default -->
+        <div class="map-overlay-panel">
+          <q-icon name="science" size="16px" color="grey-5">
+            <q-tooltip>Testing tools</q-tooltip>
+          </q-icon>
+          <q-toggle
+            v-model="manualEnabledProxy"
+            dense
+            dark
+            size="sm"
+            label="Manual location"
+            left-label
           >
-        </q-toggle>
+            <q-tooltip
+              >Testing only: replaces your GPS with tap-the-map positioning. Off by default —
+              disable it before a real game.</q-tooltip
+            >
+          </q-toggle>
+          <q-btn-toggle
+            v-if="manualEnabledProxy"
+            v-model="manualModeProxy"
+            dense
+            no-caps
+            unelevated
+            toggle-color="primary"
+            :options="[
+              { label: 'GPS', value: false, icon: 'gps_fixed' },
+              { label: 'Manual', value: true, icon: 'touch_app' },
+            ]"
+          />
+        </div>
       </div>
 
       <q-chip v-if="zonePickArmed" dense class="map-overlay-hint" color="dark" text-grey-3>
@@ -191,7 +200,7 @@
 
     <!-- LOBBY -->
     <template v-if="status === 'lobby'">
-      <q-card flat bordered class="q-mt-md">
+      <q-card flat class="q-mt-md">
         <q-card-section class="q-pb-none text-subtitle1 text-weight-medium">
           Lobby · {{ players.length }} player{{ players.length === 1 ? '' : 's' }}
         </q-card-section>
@@ -219,11 +228,7 @@
                 </q-item-label>
               </q-item-section>
               <q-item-section side>
-                <q-icon
-                  :name="p.connected ? 'circle' : 'circle'"
-                  :color="p.connected ? 'positive' : 'grey-8'"
-                  size="10px"
-                >
+                <q-icon name="circle" :color="p.connected ? 'positive' : 'grey-8'" size="10px">
                   <q-tooltip>{{ p.connected ? 'Connected' : 'Disconnected' }}</q-tooltip>
                 </q-icon>
               </q-item-section>
@@ -251,32 +256,14 @@
         </q-card-section>
       </q-card>
 
-      <!-- Host controls -->
-      <template v-if="isHost">
-        <SettingsPanel v-model="settingsProxy" class="q-mt-md" />
-        <q-btn
-          class="q-mt-md"
-          color="primary"
-          size="lg"
-          unelevated
-          no-caps
-          icon="play_arrow"
-          label="Start game"
-          :disable="!canStart"
-          @click="start"
-        />
-        <div v-if="canStartHint" class="text-caption text-grey-6 q-mt-xs text-center">
-          {{ canStartHint }}
-        </div>
-      </template>
-      <div v-else class="text-caption text-grey-6 q-mt-md text-center">
-        Waiting for the host to start the game…
-      </div>
+      <!-- Everyone else sees the host's match configuration read-only -->
+      <SettingsSummary v-if="!isHost" :settings="settings" class="q-mt-md" />
+      <SettingsPanel v-else v-model="settingsProxy" class="q-mt-md" />
     </template>
 
     <!-- ACTIVE -->
     <template v-else-if="status === 'active'">
-      <q-card flat bordered class="q-mt-md">
+      <q-card flat class="q-mt-md">
         <q-card-section v-if="amHunter" class="q-gutter-y-sm">
           <div class="text-subtitle1 text-weight-medium">Hunt in progress</div>
           <div class="text-body2 text-grey-5">
@@ -302,21 +289,13 @@
             You hear a beep when a hunter gets within {{ settings?.proximityDistanceMeters }} m of
             you.
           </div>
-          <q-btn
-            color="negative"
-            unelevated
-            no-caps
-            icon="sports_score"
-            label="I've been found — report capture"
-            @click="captureOpen = true"
-          />
         </q-card-section>
       </q-card>
     </template>
 
     <!-- ENDED -->
     <template v-else-if="status === 'ended'">
-      <q-card flat bordered class="q-mt-md">
+      <q-card flat class="q-mt-md">
         <q-card-section class="text-center q-gutter-y-sm">
           <q-icon
             :name="gameOver?.winner === 'hiders' ? 'visibility_off' : 'radar'"
@@ -327,24 +306,13 @@
             {{ gameOver?.winner === 'hiders' ? 'Hiders win!' : 'Hunters win!' }}
           </div>
           <div class="text-body2 text-grey-5">{{ gameOver?.reason }}</div>
-          <div v-if="isHost" class="row q-gutter-sm justify-center q-mt-sm">
-            <q-btn
-              color="primary"
-              unelevated
-              no-caps
-              icon="replay"
-              label="Back to lobby"
-              @click="reset"
-            />
-          </div>
-          <div v-else class="text-caption text-grey-6">The host can start a rematch.</div>
         </q-card-section>
       </q-card>
     </template>
 
     <!-- Capture dialog (hider picks who found them) -->
     <q-dialog v-model="captureOpen">
-      <q-card style="min-width: 300px" dark>
+      <q-card dark class="dialog-card">
         <q-card-section>
           <div class="text-h6">Who found you?</div>
         </q-card-section>
@@ -375,7 +343,7 @@
 
     <!-- Game over dialog -->
     <q-dialog v-model="overDialogOpen">
-      <q-card style="min-width: 300px" dark class="text-center">
+      <q-card dark class="dialog-card text-center">
         <q-card-section class="q-gutter-y-sm">
           <q-icon
             :name="gameOver?.winner === 'hiders' ? 'emoji_events' : 'military_tech'"
@@ -392,6 +360,54 @@
         </q-card-actions>
       </q-card>
     </q-dialog>
+
+    <!-- Bottom action bar: the one thumb-reachable primary action per state -->
+    <div v-if="bottomBar" class="bottom-bar">
+      <template v-if="bottomBar === 'start'">
+        <q-btn
+          class="full-width"
+          color="primary"
+          size="lg"
+          unelevated
+          no-caps
+          icon="play_arrow"
+          label="Start game"
+          :disable="!canStart"
+          @click="start"
+        />
+        <div v-if="canStartHint" class="text-caption text-grey-6 text-center q-pt-xs">
+          {{ canStartHint }}
+        </div>
+      </template>
+      <q-btn
+        v-else-if="bottomBar === 'capture'"
+        class="full-width"
+        color="negative"
+        size="lg"
+        unelevated
+        no-caps
+        icon="sports_score"
+        label="I've been found — report capture"
+        @click="captureOpen = true"
+      />
+      <q-btn
+        v-else-if="bottomBar === 'reset'"
+        class="full-width"
+        color="primary"
+        size="lg"
+        unelevated
+        no-caps
+        icon="replay"
+        label="Back to lobby"
+        @click="reset"
+      />
+      <div v-else-if="bottomBar === 'waiting'" class="text-body2 text-grey-5 text-center">
+        Waiting for the host to start the game…
+      </div>
+      <div v-else-if="bottomBar === 'ended-wait'" class="text-body2 text-grey-5 text-center">
+        The host can start a rematch.
+      </div>
+    </div>
   </q-page>
 </template>
 
@@ -402,6 +418,7 @@ import { useQuasar } from 'quasar'
 
 import GameMap from '@/components/GameMap.vue'
 import SettingsPanel from '@/components/SettingsPanel.vue'
+import SettingsSummary from '@/components/SettingsSummary.vue'
 import { useGameStore } from '@/stores/game'
 import { wakeLockActive } from '@/services/wakeLock'
 
@@ -461,6 +478,17 @@ const canStartHint = computed(() => {
 })
 
 const isHiding = computed(() => status.value === 'active' && tick.value?.phase === 'hiding')
+
+// The single thumb-reachable primary action for the current state — pinned to
+// the bottom of the screen (lobby: start, active hider: report capture, …).
+const bottomBar = computed(() => {
+  if (status.value === 'lobby') return isHost.value ? 'start' : 'waiting'
+  if (status.value === 'active') {
+    return amHider.value && !me.value?.captured ? 'capture' : null
+  }
+  if (status.value === 'ended') return isHost.value ? 'reset' : 'ended-wait'
+  return null
+})
 
 // Manual location (testing): feature switch + live GPS/Manual mode.
 const manualEnabledProxy = computed({
@@ -531,9 +559,6 @@ const nextRevealIn = computed(() => tick.value?.nextRevealIn ?? '–')
 const statusLabel = computed(() =>
   status.value === 'lobby' ? 'LOBBY' : status.value === 'active' ? 'LIVE' : 'ENDED',
 )
-const statusColor = computed(() =>
-  status.value === 'lobby' ? 'blue-8' : status.value === 'active' ? 'positive' : 'grey-8',
-)
 
 const gpsChipLabel = computed(() => {
   if (store.manualMode) return 'Manual'
@@ -542,11 +567,11 @@ const gpsChipLabel = computed(() => {
   return `±${Math.round(store.myPosition.accuracy)} m`
 })
 
-const gpsChipColor = computed(() => {
-  if (store.manualMode) return 'teal-6'
-  if (store.gpsError) return 'negative'
-  if (store.gpsWeak) return 'warning'
-  return 'grey-6'
+const gpsChipClass = computed(() => {
+  if (store.manualMode) return 'hud-chip--teal'
+  if (store.gpsError) return 'hud-chip--red'
+  if (store.gpsWeak) return 'hud-chip--warn'
+  return ''
 })
 
 const myRoleProxy = computed({
@@ -668,36 +693,82 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.room-page {
+  /* clears the fixed bottom action bar */
+  padding-bottom: 116px;
+}
+
+.room-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 1200;
+  background: rgba(16, 20, 19, 0.88);
+  backdrop-filter: blur(12px);
+}
+
 .room-code {
   letter-spacing: 0.3em;
-  font-size: 1.3rem;
+  font-size: 1.25rem;
+}
+
+.status-pill {
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.status-pill--lobby {
+  background: rgba(33, 150, 243, 0.16);
+  color: #64b5f6;
+}
+
+.status-pill--active {
+  background: rgba(0, 230, 118, 0.14);
+  color: #3dfa94;
+}
+
+.status-pill--ended {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.6);
 }
 
 .map-holder {
   position: relative;
-  height: 52vh;
-  min-height: 320px;
-  border-radius: 8px;
+  height: min(58vh, 560px);
+  min-height: 300px;
+  border-radius: var(--mm-radius, 20px);
   overflow: hidden;
 }
 
 .map-holder--short {
-  height: 42vh;
+  height: min(42vh, 420px);
 }
 
-.map-overlay-panel {
+/* Overlay panels live in one stacked column — they can never overlap. */
+.map-overlay-stack {
   position: absolute;
   top: 8px;
   right: 8px;
   z-index: 1100;
   display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  max-width: calc(100% - 16px);
+}
+
+.map-overlay-panel {
+  display: flex;
   align-items: center;
   gap: 8px;
-  padding: 4px 10px;
-  border-radius: 18px;
-  background: rgba(20, 20, 20, 0.88);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  backdrop-filter: blur(4px);
+  flex-wrap: wrap;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(16, 20, 19, 0.86);
+  backdrop-filter: blur(8px);
+  max-width: 100%;
 }
 
 .map-overlay-hint {
@@ -718,8 +789,91 @@ onBeforeUnmount(() => {
   bottom: 80px;
 }
 
+.hud-row {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  margin: 2px 0 8px;
+  padding: 2px;
+}
+
 .hud-chip {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 13px;
+  border-radius: 999px;
+  background: var(--mm-surface, rgba(255, 255, 255, 0.045));
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.hud-chip--amber {
+  background: rgba(255, 171, 0, 0.14);
+  color: #ffc862;
+}
+
+.hud-chip--green {
+  background: rgba(0, 230, 118, 0.12);
+  color: #4dffa0;
+}
+
+.hud-chip--orange {
+  background: rgba(255, 138, 101, 0.14);
+  color: #ff9b7a;
+}
+
+.hud-chip--purple {
+  background: rgba(206, 147, 216, 0.14);
+  color: #dca6e8;
+}
+
+.hud-chip--teal {
+  background: rgba(77, 214, 196, 0.14);
+  color: #5fe0cd;
+}
+
+.hud-chip--red {
+  background: rgba(255, 82, 82, 0.16);
+  color: #ff8a80;
+}
+
+.hud-chip--warn {
+  background: rgba(255, 210, 87, 0.14);
+  color: #ffd75e;
+}
+
+.banner--amber {
+  background: rgba(255, 171, 0, 0.14);
+  color: #ffd75e;
+}
+
+.banner--red {
+  background: rgba(255, 82, 82, 0.16);
+  color: #ff8a80;
+}
+
+.banner--grey {
+  background: var(--mm-surface-strong, rgba(255, 255, 255, 0.09));
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.bottom-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1250;
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  background: rgba(16, 20, 19, 0.92);
+  backdrop-filter: blur(12px);
+}
+
+.dialog-card {
+  width: min(92vw, 340px);
 }
 
 .proximity-banner {

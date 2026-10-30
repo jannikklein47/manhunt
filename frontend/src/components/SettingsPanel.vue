@@ -1,5 +1,5 @@
 <template>
-  <q-card flat bordered class="settings-panel">
+  <q-card flat class="settings-panel">
     <q-card-section class="row items-center q-py-sm q-gutter-x-sm">
       <q-icon name="tune" size="22px" color="primary" />
       <div class="text-subtitle1 text-weight-medium">Game settings</div>
@@ -17,7 +17,7 @@
 
     <q-card-section class="q-pt-none">
       <div v-for="def in SETTING_DEFS" :key="def.key" class="q-mb-md">
-        <div class="row items-center no-wrap q-mb-xs">
+        <div class="row items-center no-wrap q-mb-xs q-gutter-x-sm">
           <div class="col">
             <div class="text-body2 text-weight-medium">{{ def.label }}</div>
             <div class="text-caption text-grey-6">{{ def.hint }}</div>
@@ -26,7 +26,8 @@
             :model-value="modelValue[def.key]"
             type="number"
             dense
-            outlined
+            filled
+            dark
             :disable="disabled"
             :min="def.min"
             :max="def.max"
@@ -34,7 +35,7 @@
             class="setting-input"
             @update:model-value="setSetting(def.key, $event)"
           />
-          <div class="text-caption text-grey-5 q-ml-sm setting-unit">{{ unitLabel(def.unit) }}</div>
+          <div class="text-caption text-grey-5 setting-unit">{{ unitLabel(def.unit) }}</div>
         </div>
         <q-slider
           :model-value="modelValue[def.key]"
@@ -85,7 +86,7 @@ function unitLabel(unit) {
 
 <style scoped>
 .setting-input {
-  width: 76px;
+  width: 84px;
 }
 .setting-unit {
   width: 26px;
