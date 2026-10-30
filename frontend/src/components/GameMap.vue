@@ -519,6 +519,10 @@ defineExpose({
   min-height: 260px;
   background: #0d0d0d;
   z-index: 0;
+  /* The map owns every gesture that starts on it: no page scroll while
+   * dragging, no page zoom while pinching (iOS ignores user-scalable=no,
+   * but it honours touch-action). Leaflet handles both gestures itself. */
+  touch-action: none;
 }
 
 /* Manual-location mode: invite tapping. */

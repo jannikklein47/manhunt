@@ -27,6 +27,8 @@ body {
   // mobile browsers shrink-to-fit (whole page looks zoomed out). `clip`
   // (not `hidden`) so position: sticky keeps working.
   overflow-x: clip;
+  // App feel: no pull-to-refresh and no rubber-band bounce at scroll edges.
+  overscroll-behavior: none;
 }
 
 // ------------------------------------------------------------- flat surfaces
