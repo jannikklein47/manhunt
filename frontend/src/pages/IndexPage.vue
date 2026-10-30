@@ -1,7 +1,7 @@
 <template>
-  <q-page class="home-page column items-center justify-center q-pa-lg">
-    <div class="col-shrink text-center q-mb-xl">
-      <div class="text-h2 text-weight-bolder brand-title">MANHUNT</div>
+  <q-page class="home-page column items-center q-pa-md">
+    <div class="col-shrink text-center q-mb-lg brand-block">
+      <div class="brand-title">MANHUNT</div>
       <div class="text-subtitle1 text-grey-5">Real-time outdoor hide &amp; seek · GPS required</div>
     </div>
 
@@ -192,15 +192,29 @@ onBeforeUnmount(() => {
   background: radial-gradient(ellipse at 50% 0%, rgba(0, 230, 118, 0.09), transparent 55%), #121212;
 }
 
-.brand-title {
-  letter-spacing: 0.35em;
-  color: #00e676;
-  text-shadow: 0 0 30px rgba(0, 230, 118, 0.35);
+/*
+ * Centered when the viewport is tall, fully scrollable when it is not:
+ * auto margins collapse to 0 on overflow instead of clipping the top
+ * (which is what `justify-center` does on a short screen).
+ */
+.brand-block {
+  margin-top: auto;
+  padding-top: 16px;
 }
 
 .action-card {
+  margin-bottom: auto;
   width: 100%;
   max-width: 420px;
+}
+
+.brand-title {
+  font-size: clamp(2rem, 11vw, 3rem);
+  font-weight: 800;
+  letter-spacing: 0.3em;
+  margin-left: 0.3em; /* optically recenters the tracked-out text */
+  color: #00e676;
+  text-shadow: 0 0 30px rgba(0, 230, 118, 0.35);
 }
 
 .join-card {
