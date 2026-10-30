@@ -331,6 +331,21 @@ export const useGameStore = defineStore('game', () => {
     })
   }
 
+  /** Host only, lobby only: re-place the zone center. Resolves with the center. */
+  function setZoneCenter(center) {
+    if (!roomCode.value) return Promise.reject(new Error('Not in a room'))
+    return new Promise((resolve, reject) => {
+      socket.emit(
+        'room:set_zone_center',
+        { roomCode: roomCode.value, zoneCenter: center },
+        (res) => {
+          if (res?.ok) resolve(res.zoneCenter)
+          else reject(new Error(res?.error || 'Could not move the zone'))
+        },
+      )
+    })
+  }
+
   function setRole(role) {
     if (!roomCode.value) return
     socket.emit('player:set_role', { roomCode: roomCode.value, role })
@@ -438,6 +453,7 @@ export const useGameStore = defineStore('game', () => {
     createRoom,
     joinRoom,
     updateSettings,
+    setZoneCenter,
     setRole,
     startGame,
     resetGame,

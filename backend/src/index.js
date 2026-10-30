@@ -112,6 +112,13 @@ export function createApp() {
       }, ack)
     })
 
+    socket.on('room:set_zone_center', ({ roomCode, zoneCenter } = {}, ack) => {
+      withRoom(roomCode, socket, (room, player) => {
+        const center = room.setZoneCenter(player, zoneCenter || {})
+        ok(ack, { zoneCenter: center })
+      }, ack)
+    })
+
     socket.on('player:set_role', ({ roomCode, role } = {}, ack) => {
       withRoom(roomCode, socket, (room, player) => {
         if (room.status !== 'lobby') throw new GameError('Role can only be changed in the lobby')

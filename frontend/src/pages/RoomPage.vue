@@ -85,8 +85,11 @@
     <!-- Map -->
     <div class="map-holder" :class="{ 'map-holder--short': status !== 'active' }">
       <GameMap
-        :zone-center="zoneCenter"
+        :zone-center="mapZoneCenter"
         :zone-radius="zoneRadius"
+        :mode="zonePickArmed ? 'picker' : 'view'"
+        :picked="zonePickArmed ? zonePick : null"
+        @update:picked="onZonePick"
         :hunters="store.hunterPositions"
         :hiders="visibleHiders"
         :captured-ids="capturedIds"
@@ -134,14 +137,37 @@
         />
       </div>
 
-      <q-chip v-if="manualLocationActive" dense class="map-overlay-hint" color="dark" text-grey-3>
+      <!-- Host, lobby only: re-place the zone center on the map -->
+      <div v-if="canPickZone" class="map-overlay-panel">
+        <q-icon name="my_location" size="16px" color="grey-5">
+          <q-tooltip>Move the zone center</q-tooltip>
+        </q-icon>
+        <q-toggle v-model="zonePickArmed" dense dark size="sm" label="Move zone" left-label>
+          <q-tooltip
+            >Lobby only: tap the map to move the zone center for everyone; drag the ◎ marker to
+            fine-tune.</q-tooltip
+          >
+        </q-toggle>
+      </div>
+
+      <q-chip v-if="zonePickArmed" dense class="map-overlay-hint" color="dark" text-grey-3>
+        Tap the map to place the zone center
+      </q-chip>
+
+      <q-chip
+        v-if="manualLocationActive"
+        dense
+        class="map-overlay-hint map-overlay-hint--raised"
+        color="dark"
+        text-grey-3
+      >
         Tap the map to set your position
       </q-chip>
 
       <q-chip
         v-if="screenMaySleep"
         dense
-        class="map-overlay-hint map-overlay-hint--raised"
+        class="map-overlay-hint map-overlay-hint--high"
         color="dark"
         text-amber-5
       >
@@ -447,6 +473,33 @@ const manualModeProxy = computed({
 })
 const manualLocationActive = computed(() => store.manualEnabled && store.manualMode)
 
+// ----------------------------------------------------- host: move the zone
+
+// In the lobby the host can re-place the zone center: arming "Move zone"
+// switches the map to picker mode — taps (and drags of the ◎ marker) commit
+// the new center for everyone via room:set_zone_center.
+const zonePickArmed = ref(false)
+const zonePick = ref(null)
+const canPickZone = computed(() => isHost.value && status.value === 'lobby')
+// While picking, the zone circle previews at the tentative spot; once the
+// server round-trips, zoneCenter === zonePick and nothing jumps.
+const mapZoneCenter = computed(() => (zonePickArmed.value && zonePick.value) || zoneCenter.value)
+function onZonePick(center) {
+  zonePick.value = center
+  store.setZoneCenter(center).catch((e) => {
+    $q.notify({ type: 'negative', message: e.message })
+    zonePickArmed.value = false
+    zonePick.value = null
+  })
+}
+// Leaving the lobby (game start / room exit) disarms zone picking.
+watch(status, (next) => {
+  if (next !== 'lobby') {
+    zonePickArmed.value = false
+    zonePick.value = null
+  }
+})
+
 // Hider pins on the map:
 // - in the lobby everyone sees everyone,
 // - hunters see the full hider list (periodic reveals + live-exposed),
@@ -659,6 +712,10 @@ onBeforeUnmount(() => {
 
 .map-overlay-hint--raised {
   bottom: 46px;
+}
+
+.map-overlay-hint--high {
+  bottom: 80px;
 }
 
 .hud-chip {

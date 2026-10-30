@@ -270,6 +270,20 @@ export class Room {
     return this.settings
   }
 
+  /**
+   * Host extension: re-place the zone center on the map (lobby only). Also
+   * re-anchors rematches — start()/resetToLobby() restore this center.
+   */
+  setZoneCenter(requestedBy, center) {
+    this.assertHost(requestedBy)
+    if (this.status !== 'lobby') throw new GameError('Zone can only be moved in the lobby')
+    if (!isValidZoneCenter(center)) throw new GameError('A valid zone center (lat/lng) is required')
+    this.zoneCenter = { lat: center.lat, lng: center.lng }
+    this.initialZoneCenter = { ...this.zoneCenter }
+    this.broadcastState()
+    return { ...this.zoneCenter }
+  }
+
   assertHost(player) {
     if (!player || player.id !== this.hostId) throw new GameError('Only the host can do that')
   }

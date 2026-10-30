@@ -228,6 +228,28 @@ const radiusBack = once(hider, 'room:state_changed')
 await emitAck(host, 'room:update_settings', { roomCode: code, settings: { initialZoneRadius: 50 } })
 assert((await radiusBack).roomState.currentZoneRadius === 50, 'lobby zone preview restored')
 
+// ------------------------------------------------------- move the zone center
+
+// The host can re-place the zone center in the lobby — even after the
+// create screen — and the new center is broadcast to everyone.
+const movedState = once(hider, 'room:state_changed')
+const moved = await emitAck(host, 'room:set_zone_center', {
+  roomCode: code,
+  zoneCenter: { lat: 52.004, lng: 13.004 },
+})
+assert(moved?.ok, 'host can move the zone center in the lobby')
+assert((await movedState).roomState.zoneCenter.lat === 52.004, 'new zone center broadcast to the room')
+// Non-hosts cannot move the zone.
+const centerDenied = await emitAck(hider, 'room:set_zone_center', {
+  roomCode: code,
+  zoneCenter: { lat: 52.008, lng: 13.008 },
+})
+assert(centerDenied?.ok === false, 'zone center move by non-host rejected')
+// Restore so the game:start tick assertions (ZONE) stay valid.
+const centerBack = once(hider, 'room:state_changed')
+await emitAck(host, 'room:set_zone_center', { roomCode: code, zoneCenter: ZONE })
+assert((await centerBack).roomState.zoneCenter.lat === ZONE.lat, 'zone center restored')
+
 // ---------------------------------------------------------------- game:start
 
 const errPromise = once(hunter, 'room:error')
@@ -252,6 +274,12 @@ assert(tick.nextShrinkIn === 30, 'tick: next shrink driven by zoneShrinkInterval
 assert(tick.nextRevealIn === 60, 'tick: nextRevealIn driven by hiderRevealInterval')
 assert(tick.phase === 'main', 'tick: phase = main (hide phase disabled)')
 assert(tick.zoneCenter && tick.zoneCenter.lat === ZONE.lat, 'tick carries the zone center')
+// …and the center is locked once the match is running.
+const centerLocked = await emitAck(host, 'room:set_zone_center', {
+  roomCode: code,
+  zoneCenter: { lat: 52.5, lng: 13.5 },
+})
+assert(centerLocked?.ok === false, 'zone center is locked once the game started')
 
 const snapshot = await hunterSnapshot
 assert(Array.isArray(snapshot) && snapshot[0].id === hiderId, 'hunters received initial hider snapshot')
