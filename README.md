@@ -135,7 +135,7 @@ The player's own marker and accuracy circle are always updated, even with degrad
 
 ## Browser API usage
 
-- **Screen Wake Lock** — requested for the duration of a match, re-acquired on `visibilitychange`.
+- **Screen Wake Lock** — requested for the whole room session (lobby, hiding phase and match), re-acquired on `visibilitychange` and whenever the browser revokes it, with a retry loop while it is denied (e.g. battery saver). On browsers without Wake Lock support (iOS < 18.4) the map shows a "screen may turn off" hint — there is no web API fallback there; set *Auto-Lock → Never* as a workaround.
 - **Geolocation** — `watchPosition` with `{ enableHighAccuracy: true, maximumAge: 0, timeout: 5000 }`; accuracy policy as above (enforced on client *and* server).
 - **Web Audio** — the `AudioContext` is created/resumed on the first user gesture (Create/Join buttons) to satisfy mobile autoplay policies.
 

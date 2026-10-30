@@ -137,6 +137,16 @@
       <q-chip v-if="manualLocationActive" dense class="map-overlay-hint" color="dark" text-grey-3>
         Tap the map to set your position
       </q-chip>
+
+      <q-chip
+        v-if="screenMaySleep"
+        dense
+        class="map-overlay-hint map-overlay-hint--raised"
+        color="dark"
+        text-amber-5
+      >
+        Screen may turn off — this browser can't keep it awake
+      </q-chip>
     </div>
 
     <div
@@ -367,6 +377,7 @@ import { useQuasar } from 'quasar'
 import GameMap from '@/components/GameMap.vue'
 import SettingsPanel from '@/components/SettingsPanel.vue'
 import { useGameStore } from '@/stores/game'
+import { wakeLockActive } from '@/services/wakeLock'
 
 const route = useRoute()
 const router = useRouter()
@@ -383,6 +394,12 @@ let statusWatch = null
 const roomCode = computed(() => route.params.code?.toUpperCase() || '')
 const roomState = computed(() => store.roomState)
 const status = computed(() => store.status)
+// While we are in a room (lobby/match) the app holds a screen wake lock; if
+// the browser cannot grant it (unsupported — e.g. older iOS — or denied by
+// battery saver), tell the player their screen may still turn off.
+const screenMaySleep = computed(
+  () => (status.value === 'lobby' || status.value === 'active') && !wakeLockActive.value,
+)
 const settings = computed(() => store.settings)
 const zoneRadius = computed(() => store.zoneRadius)
 const myPlayerId = computed(() => store.myPlayerId)
@@ -637,6 +654,10 @@ onBeforeUnmount(() => {
   z-index: 1100;
   pointer-events: none;
   opacity: 0.92;
+}
+
+.map-overlay-hint--raised {
+  bottom: 46px;
 }
 
 .hud-chip {

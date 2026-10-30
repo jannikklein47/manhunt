@@ -173,10 +173,11 @@ export const useGameStore = defineStore('game', () => {
 
   // ------------------------------------------------------ wake lock
 
-  // Hold a screen wake lock for the whole room lifetime (lobby → end):
+  // Hold a screen wake lock for the whole room lifetime — lobby, hiding phase
+  // and match alike (people are outdoors looking at the map the entire time);
   // re-acquired automatically on visibilitychange by the service.
   watch(status, (next) => {
-    if (next === 'active') requestWakeLock()
+    if (next === 'active' || next === 'lobby') requestWakeLock()
     else if (next === 'ended' || next === 'idle') releaseWakeLock()
   })
 
