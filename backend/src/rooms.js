@@ -74,11 +74,11 @@ export function applyShrink(radiusMeters, percent) {
 
 /**
  * Pure helper (exported for tests): one random zone drift. The zone does not
- * only shrink — each shrink tick it also wanders up to half its radius in a
+ * only shrink — each shrink tick it also wanders up to its full radius in a
  * uniformly random direction. `rng` is injectable for deterministic tests.
  */
 export function applyZoneShift(center, radiusMeters, rng = Math.random) {
-  const dist = rng() * radiusMeters * 0.5 // 0 … ½ of the current radius
+  const dist = rng() * radiusMeters // 0 … 1× the current radius
   if (dist === 0) return { lat: center.lat, lng: center.lng } // exact no-move
   const bearing = rng() * 360
   const next = destination(point([center.lng, center.lat]), dist, bearing, { units: 'meters' })
@@ -382,7 +382,7 @@ export class Room {
 
   shrinkZone() {
     this.currentZoneRadius = applyShrink(this.currentZoneRadius, this.settings.zoneShrinkPercent)
-    // …and it wanders: up to half its (new) radius in a random direction.
+    // …and it wanders: up to its full (new) radius in a random direction.
     this.zoneCenter = applyZoneShift(this.zoneCenter, this.currentZoneRadius)
     // A smaller or moved zone can push hiders outside it → re-evaluate exposure.
     for (const hider of this.playersWithRole('hider')) {

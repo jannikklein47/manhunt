@@ -89,7 +89,7 @@ const noShift = applyZoneShift(ZONE, 500, () => 0)
 assert(noShift.lat === ZONE.lat && noShift.lng === ZONE.lng, 'applyZoneShift: rng 0 → zone stays put')
 const maxShift = applyZoneShift(ZONE, 500, () => 1)
 const maxShiftDist = distanceMeters(ZONE, maxShift)
-assert(Math.abs(maxShiftDist - 250) < 1, 'applyZoneShift: max drift = ½ radius', `got ${maxShiftDist}m`)
+assert(Math.abs(maxShiftDist - 500) < 1, 'applyZoneShift: max drift = 1× radius', `got ${maxShiftDist}m`)
 assert(maxShift.lat > ZONE.lat, 'applyZoneShift: bearing 360 → due north')
 
 // shrinkZone wiring: one tick shrinks AND drifts; the pristine center is
@@ -104,8 +104,8 @@ const driftRoom = new Room(fakeIo, 'DRIFT', {
 driftRoom.shrinkZone()
 assert(driftRoom.currentZoneRadius === 90, 'shrinkZone: radius shrinks')
 assert(
-  distanceMeters(ZONE, driftRoom.zoneCenter) <= 45,
-  'shrinkZone: zone drifts at most ½ of the new radius',
+  distanceMeters(ZONE, driftRoom.zoneCenter) <= 90,
+  'shrinkZone: zone drifts at most 1× of the new radius',
 )
 assert(driftRoom.initialZoneCenter.lat === ZONE.lat, 'shrinkZone: pristine center kept for rematches')
 let worstRatio = 0
@@ -119,8 +119,8 @@ for (let i = 0; i < 50; i++) {
   prevCenter = driftRoom.zoneCenter
 }
 assert(
-  worstRatio <= 0.5,
-  'shrinkZone: drift ≤ ½ radius per tick (50 ticks)',
+  worstRatio <= 1.0,
+  'shrinkZone: drift ≤ 1× radius per tick (50 ticks)',
   `worst ${(worstRatio * 100).toFixed(1)}%`,
 )
 
