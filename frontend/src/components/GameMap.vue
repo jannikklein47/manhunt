@@ -65,8 +65,6 @@ let ownMarker = null
 let ownAccuracy = null
 let ownDeadMarker = null
 const markerLayer = L.layerGroup()
-/** Pins by player id — reused across redraws so moves can be animated. */
-let hunterMarkers = new Map()
 /** Hider pins by player id — the reveal wave targets these. */
 let hiderMarkers = new Map()
 let waveTimer = null
@@ -232,25 +230,9 @@ function setOwn(pos) {
       fillOpacity: 0.12,
     }).addTo(map)
   } else {
-    // Glide to the new fix; the accuracy circle rides along in lockstep and
-    // its radius eases to the new value. On a jump (> 200 m, e.g. a manual
-    // location tap) nothing tweens — snap the circle straight to the fix.
-    const radiusFrom = ownAccuracy.getRadius()
-    const radiusTo = pos.accuracy || 0
-    const tweened = smoothMove(
-      ownMarker,
-      { lat: pos.lat, lng: pos.lng },
-      {
-        onFrame: (lat, lng, e) => {
-          ownAccuracy.setLatLng([lat, lng])
-          ownAccuracy.setRadius(radiusFrom + (radiusTo - radiusFrom) * e)
-        },
-      },
-    )
-    if (!tweened) {
-      ownAccuracy.setLatLng([pos.lat, pos.lng])
-      ownAccuracy.setRadius(radiusTo)
-    }
+    ownMarker.setLatLng([pos.lat, pos.lng])
+    ownAccuracy.setLatLng([pos.lat, pos.lng])
+    ownAccuracy.setRadius(pos.accuracy || 0)
   }
   if (props.follow && !pos.manual) map.panTo([pos.lat, pos.lng], { animate: true, duration: 0.4 })
 }
@@ -281,124 +263,33 @@ function setOwnDeadPin(pos) {
 
 function redrawMarkers() {
   if (!map) return
+  markerLayer.clearLayers()
+  hiderMarkers = new Map()
   const captured = new Set(props.capturedIds)
-  const seenHunters = new Set()
-  const seenHiders = new Set()
 
   for (const h of props.hunters) {
     if (h.lat == null || h.lng == null) continue
-    seenHunters.add(h.id)
-    upsertMarker(
-      hunterMarkers,
-      h,
-      roleIcon(COLORS.hunter, { glyph: initial(h.name) }),
-      `Hunter ${h.name}`,
-    )
+    L.marker([h.lat, h.lng], { icon: roleIcon(COLORS.hunter, { glyph: initial(h.name) }) })
+      .bindTooltip(`Hunter ${h.name}`)
+      .addTo(markerLayer)
   }
 
   for (const h of props.hiders) {
     if (h.lat == null || h.lng == null) continue
-    seenHiders.add(h.id)
     const isDead = captured.has(h.id)
     const color = isDead ? COLORS.captured : h.isExposedLive ? COLORS.exposed : COLORS.hider
-    const tooltip = `${h.name}${isDead ? ' (found)' : h.isExposedLive ? ' — LIVE' : ''}`
-    upsertMarker(
-      hiderMarkers,
-      h,
-      roleIcon(color, {
+    const marker = L.marker([h.lat, h.lng], {
+      icon: roleIcon(color, {
         pulse: h.isExposedLive && !isDead,
         // Exposed pins wave continuously instead of only on reveals.
         waveLive: h.isExposedLive && !isDead,
         dead: isDead,
         glyph: initial(h.name),
       }),
-      tooltip,
-    )
-  }
-
-  // Drop pins whose player vanished (left the room, game ended, …).
-  dropStale(hunterMarkers, seenHunters)
-  dropStale(hiderMarkers, seenHiders)
-}
-
-/** Update-or-create a pin; existing pins glide to their new position. */
-function upsertMarker(store, data, icon, tooltip) {
-  let marker = store.get(data.id)
-  if (!marker) {
-    marker = L.marker([data.lat, data.lng], { icon }).bindTooltip(tooltip).addTo(markerLayer)
-    store.set(data.id, marker)
-    return
-  }
-  marker.setIcon(icon)
-  marker.setTooltipContent(tooltip)
-  smoothMove(marker, data)
-}
-
-/** Remove pins that are no longer in the payload. */
-function dropStale(store, seen) {
-  for (const [id, marker] of store) {
-    if (seen.has(id)) continue
-    cancelTween(marker)
-    marker.remove()
-    store.delete(id)
-  }
-}
-
-// ------------------------------------------------------------ smooth moves
-
-const SMOOTH_MOVE_MS = 700
-/** Beyond this distance the pin jumps — a tween across the map looks wrong. */
-const SMOOTH_MOVE_MAX_METERS = 200
-
-/** Approximate distance between two lat/lng points (haversine, meters). */
-function haversineMeters(a, b) {
-  const R = 6371000
-  const dLat = ((b.lat - a.lat) * Math.PI) / 180
-  const dLng = ((b.lng - a.lng) * Math.PI) / 180
-  const s =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((a.lat * Math.PI) / 180) * Math.cos((b.lat * Math.PI) / 180) * Math.sin(dLng / 2) ** 2
-  return 2 * R * Math.asin(Math.sqrt(s))
-}
-
-/**
- * GLIDE: tween a marker to `to` with an ease-out curve via rAF — Leaflet
- * positions markers with a transform, so a CSS transition would also lag the
- * pins behind every pan/zoom. Jump instantly for teleports (manual location
- * taps, fresh reveal snapshots far away) and when there is nothing to animate.
- * `onFrame(lat, lng, eased)` lets callers move companion shapes (accuracy
- * circle) in lockstep.
- */
-function smoothMove(
-  marker,
-  to,
-  { duration = SMOOTH_MOVE_MS, maxMeters = SMOOTH_MOVE_MAX_METERS, onFrame } = {},
-) {
-  cancelTween(marker)
-  const from = marker.getLatLng()
-  if (from.lat === to.lat && from.lng === to.lng) return false
-  if (!Number.isFinite(from.lat) || haversineMeters(from, to) > maxMeters) {
-    marker.setLatLng([to.lat, to.lng])
-    return false
-  }
-  const start = performance.now()
-  const frame = (now) => {
-    const t = Math.min(1, (now - start) / duration)
-    const e = 1 - (1 - t) ** 3 // easeOutCubic
-    const lat = from.lat + (to.lat - from.lat) * e
-    const lng = from.lng + (to.lng - from.lng) * e
-    marker.setLatLng([lat, lng])
-    onFrame?.(lat, lng, e)
-    marker._mmTween = t < 1 ? requestAnimationFrame(frame) : null
-  }
-  marker._mmTween = requestAnimationFrame(frame)
-  return true
-}
-
-function cancelTween(marker) {
-  if (marker._mmTween) {
-    cancelAnimationFrame(marker._mmTween)
-    marker._mmTween = null
+    })
+      .bindTooltip(`${h.name}${isDead ? ' (found)' : h.isExposedLive ? ' — LIVE' : ''}`)
+      .addTo(markerLayer)
+    hiderMarkers.set(h.id, marker)
   }
 }
 
@@ -446,10 +337,6 @@ onMounted(() => {
 onBeforeUnmount(() => {
   clearTimeout(waveTimer)
   wavedEls = []
-  // Stop any in-flight position tweens before tearing the map down.
-  if (ownMarker) cancelTween(ownMarker)
-  for (const marker of hunterMarkers.values()) cancelTween(marker)
-  for (const marker of hiderMarkers.values()) cancelTween(marker)
   map?.remove()
   map = null
   zoneCircle = null
@@ -457,7 +344,6 @@ onBeforeUnmount(() => {
   ownMarker = null
   ownAccuracy = null
   ownDeadMarker = null
-  hunterMarkers = new Map()
   hiderMarkers = new Map()
 })
 
@@ -504,7 +390,7 @@ watch(
 )
 watch(() => [props.hunters, props.hiders, props.capturedIds], redrawMarkers, { deep: true })
 // Registered AFTER the redraw watcher: on a reveal the snapshot markers are
-// updated (and re-iconed) first, then the wave plays on the fresh elements.
+// rebuilt first, then the wave plays on the fresh elements.
 watch(
   () => props.revealSeq,
   () => playRevealWave(),
