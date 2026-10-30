@@ -247,6 +247,8 @@ export class Room {
     this.assertHost(requestedBy)
     if (this.status !== 'lobby') throw new GameError('Settings can only be changed in the lobby')
     this.settings = mergeSettings(this.settings, patch)
+    // Lobby-only: the zone radius preview must follow the slider immediately.
+    this.currentZoneRadius = this.settings.initialZoneRadius
     this.broadcastState()
     return this.settings
   }
@@ -575,6 +577,11 @@ export class Room {
       player.isExposedLive = false
     }
     this.broadcastState()
+    // Reopen the lobby WITH everyone's last known position — players are
+    // still standing where the game ended, so both lists go out immediately
+    // instead of waiting for the first movement-based fix.
+    this.broadcastHunterPositions()
+    this.io.to(this.code).emit('map:hider_positions', this.hiderListPayload())
   }
 }
 

@@ -172,6 +172,22 @@ assert((await lobbyHunterList).length > 0, 'lobby: hider sees hunter positions')
 await sleep(900)
 assert(lobbyBeep === false, 'no proximity alerts in the lobby')
 
+// ---------------------------------------------------------------- lobby zone preview
+
+// Changing initialZoneRadius must update the zone radius (map preview)
+// immediately — currentZoneRadius mirrors the setting while in the lobby.
+// NB: initialZoneRadius steps in 50 m increments.
+const radiusState = once(hider, 'room:state_changed')
+const radiusUpdate = await emitAck(host, 'room:update_settings', { roomCode: code, settings: { initialZoneRadius: 150 } })
+assert(radiusUpdate?.ok, 'host can update initialZoneRadius')
+const radiusRs = (await radiusState).roomState
+assert(radiusRs.settings.initialZoneRadius === 150, 'settings update stored (initialZoneRadius)')
+assert(radiusRs.currentZoneRadius === 150, 'lobby zone preview follows initialZoneRadius')
+// Restore so the game:start assertions below stay valid.
+const radiusBack = once(hider, 'room:state_changed')
+await emitAck(host, 'room:update_settings', { roomCode: code, settings: { initialZoneRadius: 50 } })
+assert((await radiusBack).roomState.currentZoneRadius === 50, 'lobby zone preview restored')
+
 // ---------------------------------------------------------------- game:start
 
 const errPromise = once(hunter, 'room:error')
@@ -204,6 +220,10 @@ const secondTick = await once(hider, 'game:tick')
 assert(secondTick.timeRemaining === 3599, 'tick countdown decrements every second')
 assert(secondTick.nextRevealIn === 59, 'reveal countdown decrements every second')
 
+// The host (Alice) is a hunter too — one in-game fix so her lastLocation
+// exists for the reset-list assertions further down.
+host.emit('player:location', { lat: 52.0, lng: 13.0, accuracy: 5 })
+
 // ---------------------------------------------------------------- exposure + proximity
 
 // Hider stands just outside the 50m zone (≈ 111m north) → exposed live.
@@ -213,10 +233,15 @@ const exposedPayload = await exposed
 assert(exposedPayload[0].isExposedLive === true, 'hider outside zone → live exposure to hunters')
 assert(exposedPayload[0].lat === 52.001, 'exposed payload carries live coordinates')
 
-// Hunters are public: hiders see them live.
-const farHunters = once(hider, 'map:hunter_positions')
+// Hunters are public: hiders see them live. (onceWhere: an earlier hunter's
+// broadcast can be delivered late — match Ivy's entry specifically.)
+const farHunters = onceWhere(
+  hider,
+  'map:hunter_positions',
+  (list) => list.some((h) => h.id === hunterId && h.lat === 52.0),
+)
 hunter.emit('player:location', { lat: 52.0, lng: 13.0, accuracy: 5 })
-assert((await farHunters)[0].id === hunterId, 'hiders receive live hunter positions')
+assert((await farHunters).some((h) => h.id === hunterId), 'hiders receive live hunter positions')
 
 // Hunter far away (> 5m) → no proximity alert for the hider.
 let alertFiredWhileFar = false
@@ -256,7 +281,7 @@ assert(junkArrived === false, 'junk fix (5 km error) is dropped entirely')
 // A quality fix far away still updates hiders' hunter view.
 const farUpdate = once(hider, 'map:hunter_positions')
 hunter.emit('player:location', { lat: 52.0, lng: 13.0, accuracy: 10 })
-assert((await farUpdate)[0].id === hunterId, 'quality fix updates hunter position for hiders')
+assert((await farUpdate).some((h) => h.id === hunterId), 'quality fix updates hunter position for hiders')
 
 // ---------------------------------------------------------------- capture → hunters win
 
@@ -288,10 +313,20 @@ assert((await leaveState).roomState.players[hunterId] === undefined, 'leaving an
 // ---------------------------------------------------------------- reset
 
 const resetState = once(hider, 'room:state_changed')
+// Alice (host/hunter) reports her position in the reopened lobby first — the
+// other hunter left after the game, so she's the only hunter with a fix.
+host.emit('player:location', { lat: 52.0, lng: 13.0, accuracy: 5 })
+await sleep(200)
+// The reopened lobby must include everyone's last known position right away —
+// register the listeners BEFORE the reset emits them.
+const resetHunterList = once(hider, 'map:hunter_positions')
+const resetHiderList = once(hider, 'map:hider_positions')
 const reset = await emitAck(host, 'game:reset', { roomCode: code })
 assert(reset?.ok, 'host can reset an ended game (after a player left)')
 assert((await resetState).roomState.status === 'lobby', 'status back to lobby')
 assert((await once(hider, 'game:tick').catch(() => null)) === null, 'timers stopped after reset')
+assert((await resetHunterList).length > 0, 'reset broadcasts hunter positions immediately')
+assert((await resetHiderList).length > 0, 'reset broadcasts hider positions immediately')
 
 // ---------------------------------------------------------------- hiding phase (room B)
 

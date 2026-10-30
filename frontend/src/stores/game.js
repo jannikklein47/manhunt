@@ -115,11 +115,18 @@ export const useGameStore = defineStore('game', () => {
         proximity.value = { inRange: false, interval: proximity.value.interval }
       }
       if (rs.status === 'lobby') {
-        // Fresh lobby / rematch reset.
-        tick.value = null
-        gameOver.value = null
-        hunterPositions.value = []
-        hiderPositions.value = []
+        // Only on ENTERING the lobby (first join / rematch reset) — NOT on
+        // every lobby broadcast (settings updates would wipe the pins).
+        if (prevStatus !== 'lobby') {
+          tick.value = null
+          gameOver.value = null
+          hunterPositions.value = []
+          hiderPositions.value = []
+          // Report the current position right away: GPS fixes only re-emit
+          // on movement, so a stationary player would otherwise be invisible
+          // until their first move.
+          if (myPosition.value) sendLocation(myPosition.value, true)
+        }
       }
       if (rs.status === 'ended') {
         // Game over: wipe all position pins — the map shows only the zone.
