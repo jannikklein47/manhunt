@@ -1,5 +1,5 @@
 <template>
-  <q-page class="column q-pb-xl">
+  <q-page class="create-page column q-pb-xl q-px-md">
     <q-toolbar class="q-px-none">
       <q-btn flat round dense icon="arrow_back" @click="router.back()" />
       <q-toolbar-title>Create a room</q-toolbar-title>

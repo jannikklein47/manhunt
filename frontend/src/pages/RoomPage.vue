@@ -186,7 +186,7 @@
 
     <div
       v-if="status === 'active'"
-      class="row items-center q-gutter-x-md text-caption text-grey-6 q-px-sm q-py-xs"
+      class="row items-center q-gutter-x-md text-caption text-grey-6 q-py-xs"
     >
       <span><span class="legend-dot" style="background: #ff5252" /> Hunters</span>
       <span v-if="amHunter"
@@ -694,8 +694,8 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .room-page {
-  /* clears the fixed bottom action bar */
-  padding-bottom: 116px;
+  /* clears the fixed bottom action bar + screen-bound gutters */
+  padding: 0 12px 116px;
 }
 
 .room-toolbar {
@@ -704,6 +704,9 @@ onBeforeUnmount(() => {
   z-index: 1200;
   background: rgba(16, 20, 19, 0.88);
   backdrop-filter: blur(12px);
+  /* span edge-to-edge despite the page gutters (negative margins) */
+  margin: 0 -12px;
+  padding: 0 12px;
 }
 
 .room-code {
@@ -738,7 +741,8 @@ onBeforeUnmount(() => {
   position: relative;
   height: min(58vh, 560px);
   min-height: 300px;
-  border-radius: var(--mm-radius, 20px);
+  /* Full-bleed: cancel the page gutters — the map belongs edge-to-edge. */
+  margin: 0 -12px;
   overflow: hidden;
 }
 
