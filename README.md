@@ -1,38 +1,116 @@
-# Manhunt Game (manhunt)
+# Manhunt — Real-Time Outdoor Hide & Seek
 
-## Install the dependencies
+A full-stack, mobile-first hide & seek game that runs entirely in mobile browsers (Safari iOS / Chrome Android) — no app install needed. A host creates a room, configures the match, and shares a 4-letter code; hunters hunt hiders in the real world, tracked live on a dark-themed GPS map.
 
-```bash
-pnpm install
-# or: yarn/npm/bun install
+## Tech stack
+
+| Layer     | Tech                                                        |
+| --------- | ----------------------------------------------------------- |
+| Frontend  | Quasar (Vue 3 Composition API + Pinia), Leaflet dark tiles  |
+| Backend   | Node.js, Express, Socket.io                                 |
+| Geospatial | `@turf/turf` (distance / zone membership on the server)    |
+
+## Project structure
+
+```
+manhunt/
+├── backend/            # Express + Socket.io game server
+│   ├── src/
+│   │   ├── index.js    # HTTP + WebSocket wiring, serves the built SPA
+│   │   ├── rooms.js    # Room registry & game engine (timers, zones, proximity)
+│   │   └── settings.js # Settings schema: defaults + clamping ranges
+│   └── test/smoke.mjs  # End-to-end engine test over real sockets
+└── frontend/           # Quasar SPA
+    └── src/
+        ├── components/ # GameMap.vue (Leaflet), SettingsPanel.vue (host config)
+        ├── pages/      # IndexPage (home), CreatePage (host setup), RoomPage (game)
+        ├── services/   # socket, audio (Web Audio API), geo, wakeLock, settingsSchema
+        └── stores/     # Pinia game store (socket wiring, beep loop, GPS)
 ```
 
-### Start the app in development mode (HMR, error reporting, etc.)
+## Running it
+
+### Development (two terminals)
 
 ```bash
-quasar dev
+# Terminal 1 — game server on http://localhost:3000
+cd backend && npm install && npm run dev
+
+# Terminal 2 — Quasar dev server on http://localhost:9000
+cd frontend && npm install && npm run dev
 ```
 
-### Format & Lint the files
+The Quasar dev server proxies `/socket.io` to the game server, so the app talks to a single origin.
+
+### Production
 
 ```bash
-pnpm run lint
-# or: yarn/npm/bun run lint
+cd frontend && npm run build           # outputs frontend/dist/spa
+cd backend && npm start                # serves the SPA *and* WebSockets on :3000
 ```
 
-...or just check formatting & linting:
+### Testing on real phones
+
+Geolocation requires a secure context. `localhost` works on the desktop, but for real devices use one of:
+
+- `cd frontend && npx quasar dev --https` (self-signed cert) with the backend reachable from the phone, or
+- a tunnel (e.g. ngrok) in front of the production server.
+
+### Engine tests
 
 ```bash
-pnpm run lint:check
-# or: yarn/npm/bun run lint:check
+cd backend && npm test    # boots a server and plays a full match over real sockets
 ```
 
-### Build the app for production
+## Game settings (host controlled)
 
-```bash
-quasar build
-```
+| Setting                  | Default | Range          |
+| ------------------------ | ------- | -------------- |
+| `gameDurationSeconds`    | 600     | 180 – 3600 s   |
+| `initialZoneRadius`      | 500     | 50 – 2000 m    |
+| `hidePhaseSeconds`       | 60      | 0 – 600 s      |
+| `zoneShrinkInterval`     | 150     | 30 – 600 s     |
+| `zoneShrinkPercent`      | 25      | 5 – 50 %       |
+| `hiderRevealInterval`    | 60      | 10 – 300 s     |
+| `proximityDistanceMeters`| 25      | 5 – 100 m      |
+| `proximityBeepInterval`  | 30      | 5 – 60 s       |
 
-### Customize the configuration
+All timers on the server derive from these settings — no hardcoded magic numbers.
 
-See [Configuring quasar.config.js](https://v2.quasar.dev/quasar-cli-vite/quasar-config-file).
+## Core mechanics
+
+- **Hiding phase** — when `hidePhaseSeconds` > 0, the match opens with a head start: hiders run to their spots while the main timer is paused (grey), no zone shrinking, no hider reveals and no proximity alerts happen. Both sides see an amber `Hide: m:ss` countdown and a "GO HIDE!" banner; when it hits zero the main phase begins and the full `gameDurationSeconds` countdown starts.
+- **Zone** — the server shrinks the safe zone by `zoneShrinkPercent` every `zoneShrinkInterval` seconds (floor: 20 m) and streams `game:tick` once per second.
+- **Visibility** — in the **lobby**, everyone sees everyone's live position. Once the match starts: hiders always see hunters live **and each other** (team visibility: every hider's latest position streams to the hider role on every accepted fix); hunters receive hider snapshots every `hiderRevealInterval`. **Out-of-zone exception:** a hider outside the zone is streamed live to hunters (pulsing orange marker) until they re-enter.
+- **Reveal countdown & wave** — everyone sees when the next hider reveal is due (`Reveal in` / `Spotted in` chip, server-computed in `game:tick`). On each scheduled reveal the server emits `hiders:revealed` and every visible hider pin plays a wave animation — hunters see all snapshot pins wave, hiders see their own pin wave. Exposed (out-of-zone) pins wave continuously instead, and captured pins never wave.
+- **Pins** — every map pin carries the player's initial (own dot included); captured hiders turn grey with a ✕ badge. A captured hider's own map keeps a static **dead pin where they were found** while their live position keeps tracking as a grey dot. The found spot is broadcast to the whole room the moment the capture is reported — hunters never see a stale pin waiting for the next reveal. All position pins are cleared when a game ends or the room resets.
+- **Own position** — every player always sees their own location (blue dot + accuracy circle) on the map, regardless of fix quality.
+- **Manual location (testing)** — optional, **off by default**: a small "testing tools" panel on the map exposes a *Manual location* toggle. When enabled, a GPS/Manual switch appears; in Manual mode the GPS watch is stopped and tapping the map places you there (crosshair cursor), reporting the position like a normal quality GPS fix — so proximity beeps, live exposure and reveals can all be tested without walking around. The switch is per-device, survives page reloads, and can be flipped back off (or set back to GPS) at any time before/during a game.
+- **Proximity alert** — on every accepted GPS fix the server evaluates `@turf/distance(hider, hunter)`. When a hunter comes within `proximityDistanceMeters`, the hider's client plays a 1000 Hz square-wave beep (400 ms, Web Audio API) immediately and repeats it every `proximityBeepInterval` seconds until the hunter leaves the radius.
+- **Win conditions** — hunters win when every hider taps *"I've been found"* (per hider: "Found by [Hunter Name]"); hiders win when the timer hits zero with at least one hider uncaught.
+
+## GPS accuracy policy
+
+Fixes are graded by reported accuracy and used accordingly:
+
+| Grade              | Accuracy     | Used for                                                        |
+| ------------------ | ------------ | --------------------------------------------------------------- |
+| Junk               | > 100 m      | Dropped entirely (client and server)                            |
+| Degraded           | 25 – 100 m   | Map display only — no proximity alerts, no exposure changes     |
+| Quality            | ≤ 25 m       | Drives proximity alerts and out-of-zone exposure                |
+
+The player's own marker and accuracy circle are always updated, even with degraded fixes — you should never lose sight of yourself because of a weak GPS moment (the HUD chip shows `±X m` and turns amber while accuracy is degraded).
+
+## Browser API usage
+
+- **Screen Wake Lock** — requested for the duration of a match, re-acquired on `visibilitychange`.
+- **Geolocation** — `watchPosition` with `{ enableHighAccuracy: true, maximumAge: 0, timeout: 5000 }`; accuracy policy as above (enforced on client *and* server).
+- **Web Audio** — the `AudioContext` is created/resumed on the first user gesture (Create/Join buttons) to satisfy mobile autoplay policies.
+
+## WebSocket API
+
+Client → server: `room:create`, `room:update_settings`, `room:join`, `player:set_role`, `room:leave`, `game:start`, `game:reset`, `player:location`, `hider:captured`
+
+Server → client: `room:state_changed`, `game:tick`, `map:hunter_positions`, `map:hider_positions`, `hiders:revealed`, `player:proximity_alert`, `game:over`, `room:error`
+
+Mutating events acknowledge with `{ ok, ... }`; errors also arrive as `room:error`. Room state broadcasts never contain player coordinates — positions travel only over the `map:*_positions` events, so a hunter cannot extract hider locations from room state.

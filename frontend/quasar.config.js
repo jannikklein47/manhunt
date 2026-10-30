@@ -75,11 +75,24 @@ export default defineConfig((/* ctx */) => {
       // vueDevtools: true,
       // https: true,
       open: true, // opens browser window automatically
+
+      // Proxy the socket connection to the game server (`npm run dev` in backend/).
+      proxy: {
+        '/socket.io': {
+          target: 'http://localhost:3000',
+          changeOrigin: true,
+          ws: true,
+        },
+      },
     },
 
     // https://v2.quasar.dev/quasar-cli-vite/quasar-config-file#framework
     framework: {
-      config: {},
+      config: {
+        // The whole UI matches the dark map tiles.
+        dark: true,
+        notify: {},
+      },
 
       // iconSet: 'material-icons', // Quasar icon set
       // lang: 'en-US', // Quasar language pack
@@ -92,7 +105,7 @@ export default defineConfig((/* ctx */) => {
       // directives: [],
 
       // Quasar plugins
-      plugins: [],
+      plugins: ['Notify'],
     },
 
     // animations: 'all', // --- includes all animations

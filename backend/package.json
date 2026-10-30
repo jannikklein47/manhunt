@@ -1,0 +1,24 @@
+{
+  "name": "manhunt-backend",
+  "version": "0.0.1",
+  "description": "Real-time game server (Express + Socket.io + Turf) for the outdoor hide & seek app",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js",
+    "test": "node test/smoke.mjs"
+  },
+  "dependencies": {
+    "@turf/turf": "^7.2.0",
+    "express": "^5.1.0",
+    "socket.io": "^4.8.1"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.8.1"
+  },
+  "engines": {
+    "node": ">= 22.12"
+  },
+  "private": true
+}
