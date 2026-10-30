@@ -49,6 +49,37 @@ cd frontend && npm run build           # outputs frontend/dist/spa
 cd backend && npm start                # serves the SPA *and* WebSockets on :3000
 ```
 
+### Docker deployment (batterysync.de)
+
+```bash
+docker compose up -d --build
+```
+
+Single origin — everything runs behind nginx on port 4000:
+
+| What                     | URL                                    |
+| ------------------------ | -------------------------------------- |
+| SPA (frontend)           | `https://batterysync.de:4000/`         |
+| Game server API/sockets  | `https://batterysync.de:4000/backend/` |
+
+nginx (alpine) terminates TLS, serves the built SPA and proxies `/backend/` to
+the game server container over the internal network — the backend is **not**
+published to the host.
+
+The TLS certificate pair comes from `/home/ubuntu/ssl/batterysync/` on the
+host (mounted read-only to `/etc/manhunt/ssl` in the nginx container).
+Expected file names — configurable via the `SSL_CERT` / `SSL_KEY` environment
+variables in `docker-compose.yml`:
+
+- `fullchain.pem` (certificate chain)
+- `privkey.pem` (private key)
+
+The SSL certificate reader (`backend/src/ssl.js`) loads a pair if present and
+falls back to plain HTTP without it — local dev needs no certificates. The SPA
+bakes the socket base URL in at build time (`VITE_SOCKET_URL` build arg,
+default `https://batterysync.de:4000/backend`); the client derives the
+engine.io path from it (`/backend/socket.io`).
+
 ### Testing on real phones
 
 Geolocation requires a secure context. `localhost` works on the desktop, but for real devices use one of:

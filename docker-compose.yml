@@ -1,0 +1,47 @@
+# Manhunt — production deployment.
+#
+# Everything is served from ONE origin:
+#   frontend  https://batterysync.de:4000/           (nginx + TLS, SPA)
+#   backend   https://batterysync.de:4000/backend/   (proxied to the game server)
+#
+# nginx terminates TLS using the certificate pair from
+# /home/ubuntu/ssl/batterysync/ on the host (mounted read-only) and proxies
+# /backend/ to the game server container over the internal network — the
+# backend itself is NOT published to the host.
+# Expected file names (configurable below): fullchain.pem / privkey.pem
+#
+# Usage on the server:
+#   docker compose up -d --build
+
+name: manhunt
+
+services:
+  backend:
+    build: ./backend
+    image: manhunt-backend
+    restart: unless-stopped
+    # Internal only — reachable through nginx (/backend/), no host port.
+    expose:
+      - '3001'
+    environment:
+      PORT: 3001
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Baked into the SPA at build time — the browser talks to the same
+        # nginx origin, with the game server mounted under /backend.
+        VITE_SOCKET_URL: https://batterysync.de:4000/backend
+    image: manhunt-frontend
+    restart: unless-stopped
+    environment:
+      # --- SSL certificate reader (nginx template) ------------------------
+      SSL_DIR: /etc/manhunt/ssl
+      SSL_CERT: fullchain.pem
+      SSL_KEY: privkey.pem
+      SERVER_NAME: batterysync.de
+    ports:
+      - '4000:443'
+    volumes:
+      - /home/ubuntu/ssl/batterysync:/etc/manhunt/ssl:ro

@@ -7,12 +7,14 @@
  */
 import express from 'express'
 import { createServer } from 'node:http'
+import { createServer as createHttpsServer } from 'node:https'
 import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import { Server } from 'socket.io'
 
 import { GameError, Room, createRoom, getRoom, rooms } from './rooms.js'
+import { readSslCredentials } from './ssl.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PORT = Number(process.env.PORT || 3000)
@@ -20,8 +22,14 @@ const DIST_DIR = path.resolve(__dirname, '../../frontend/dist/spa')
 
 export function createApp() {
   const app = express()
-  const httpServer = createServer(app)
-  const io = new Server(httpServer)
+  // HTTPS when an SSL pair is configured (deployment), HTTP otherwise (dev).
+  const ssl = readSslCredentials()
+  const httpServer = ssl ? createHttpsServer(ssl, app) : createServer(app)
+  // The SPA may live on a different origin (https://batterysync.de:4000) than
+  // this server (https://batterysync.de:3001) — allow the socket handshake.
+  const io = new Server(httpServer, {
+    cors: { origin: process.env.CORS_ORIGIN || true },
+  })
 
   // ------------------------------------------------------------ socket api
 
@@ -198,7 +206,8 @@ const isMain = process.argv[1] && fileURLToPath(import.meta.url) === path.resolv
 
 if (isMain) {
   const { httpServer } = createApp()
+  const scheme = readSslCredentials() ? 'https' : 'http'
   httpServer.listen(PORT, () => {
-    console.log(`[manhunt] game server listening on http://localhost:${PORT}`)
+    console.log(`[manhunt] game server listening on ${scheme}://localhost:${PORT}`)
   })
 }

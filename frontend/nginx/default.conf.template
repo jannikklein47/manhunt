@@ -1,0 +1,58 @@
+# Rendered by the nginx image entrypoint: ${VARS} are substituted from the
+# environment (SSL_DIR, SSL_CERT, SSL_KEY, SERVER_NAME) — $uri, $http_upgrade
+# & friends are left alone because envsubst only touches defined env vars.
+
+# WebSocket upgrade handling for the proxied socket.io connection.
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${SERVER_NAME};
+
+    ssl_certificate     ${SSL_DIR}/${SSL_CERT};
+    ssl_certificate_key ${SSL_DIR}/${SSL_KEY};
+
+    # Modern TLS only.
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1d;
+
+    # Static SPA (Quasar build, hash router).
+    root /usr/share/nginx/html;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # Long cache for hashed assets, never for the shell.
+    location /assets/ {
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        try_files $uri =404;
+    }
+    location = /index.html {
+        add_header Cache-Control "no-cache";
+    }
+
+    # Game server behind /backend/ — the trailing slash on proxy_pass strips
+    # the prefix, so socket.io keeps its default path inside the container.
+    # Everything (SPA + API + websockets) is served from this single origin.
+    location /backend/ {
+        proxy_pass http://backend:3001/;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # WebSockets are long-lived connections.
+        proxy_read_timeout 1d;
+        proxy_send_timeout 1d;
+    }
+}
