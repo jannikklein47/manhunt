@@ -65,6 +65,9 @@ export const useGameStore = defineStore('game', () => {
   const zoneRadius = computed(
     () => tick.value?.currentZoneRadius ?? roomState.value?.currentZoneRadius ?? 0,
   )
+  // The zone center drifts with every shrink tick — prefer the live tick
+  // payload, fall back to the last state broadcast (lobby / between ticks).
+  const zoneCenter = computed(() => tick.value?.zoneCenter ?? roomState.value?.zoneCenter ?? null)
   const settings = computed(() => roomState.value?.settings || null)
 
   // ----------------------------------------------------- proximity beeps
@@ -423,6 +426,7 @@ export const useGameStore = defineStore('game', () => {
     roomCode,
     status,
     zoneRadius,
+    zoneCenter,
     settings,
     // actions
     startTracking,

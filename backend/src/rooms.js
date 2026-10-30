@@ -6,7 +6,7 @@
  * @turf/turf.
  */
 import { randomUUID } from 'node:crypto'
-import { point, distance } from '@turf/turf'
+import { point, distance, destination } from '@turf/turf'
 import { sanitizeSettings, mergeSettings } from './settings.js'
 
 /** Room codes: unambiguous alphabet (no I/L/O/0/1). */
@@ -72,6 +72,20 @@ export function applyShrink(radiusMeters, percent) {
   return Math.max(MIN_ZONE_RADIUS, Math.round(radiusMeters * (1 - percent / 100)))
 }
 
+/**
+ * Pure helper (exported for tests): one random zone drift. The zone does not
+ * only shrink — each shrink tick it also wanders up to half its radius in a
+ * uniformly random direction. `rng` is injectable for deterministic tests.
+ */
+export function applyZoneShift(center, radiusMeters, rng = Math.random) {
+  const dist = rng() * radiusMeters * 0.5 // 0 … ½ of the current radius
+  if (dist === 0) return { lat: center.lat, lng: center.lng } // exact no-move
+  const bearing = rng() * 360
+  const next = destination(point([center.lng, center.lat]), dist, bearing, { units: 'meters' })
+  const [lng, lat] = next.geometry.coordinates
+  return { lat, lng }
+}
+
 /** Pure helper (exported for tests): turf-based distance in meters. */
 export function distanceMeters(a, b) {
   return distance(point([a.lng, a.lat]), point([b.lng, b.lat])) * 1000
@@ -83,6 +97,9 @@ export class Room {
     this.code = code
     this.settings = sanitizeSettings(settings)
     this.zoneCenter = { lat: zoneCenter.lat, lng: zoneCenter.lng }
+    // Pristine host-picked center — the live one drifts during the match;
+    // rematches start() back here.
+    this.initialZoneCenter = { ...this.zoneCenter }
     this.currentZoneRadius = this.settings.initialZoneRadius
     this.timeRemaining = this.settings.gameDurationSeconds
     this.elapsed = 0
@@ -281,6 +298,7 @@ export class Room {
     this.elapsed = 0
     this.timeRemaining = this.settings.gameDurationSeconds
     this.currentZoneRadius = this.settings.initialZoneRadius
+    this.zoneCenter = { ...this.initialZoneCenter }
     this.phase = this.settings.hidePhaseSeconds > 0 ? 'hiding' : 'main'
     this.hideRemaining = this.phase === 'hiding' ? this.settings.hidePhaseSeconds : 0
 
@@ -364,7 +382,9 @@ export class Room {
 
   shrinkZone() {
     this.currentZoneRadius = applyShrink(this.currentZoneRadius, this.settings.zoneShrinkPercent)
-    // A smaller zone can push hiders outside it → re-evaluate exposure.
+    // …and it wanders: up to half its (new) radius in a random direction.
+    this.zoneCenter = applyZoneShift(this.zoneCenter, this.currentZoneRadius)
+    // A smaller or moved zone can push hiders outside it → re-evaluate exposure.
     for (const hider of this.playersWithRole('hider')) {
       this.updateHiderExposure(hider)
     }
@@ -389,6 +409,7 @@ export class Room {
     this.io.to(this.code).emit('game:tick', {
       timeRemaining: this.timeRemaining,
       currentZoneRadius: this.currentZoneRadius,
+      zoneCenter: { ...this.zoneCenter },
       nextShrinkIn: this.nextShrinkIn(),
       nextRevealIn: this.nextRevealIn(),
       phase: this.phase,
@@ -570,6 +591,7 @@ export class Room {
     this.elapsed = 0
     this.timeRemaining = this.settings.gameDurationSeconds
     this.currentZoneRadius = this.settings.initialZoneRadius
+    this.zoneCenter = { ...this.initialZoneCenter }
     for (const player of this.players.values()) {
       player.captured = false
       player.capturedBy = null

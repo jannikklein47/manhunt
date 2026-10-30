@@ -7,7 +7,7 @@
  */
 import { createApp } from '../src/index.js'
 import { io } from 'socket.io-client'
-import { applyShrink, distanceMeters } from '../src/rooms.js'
+import { applyShrink, applyZoneShift, distanceMeters, Room } from '../src/rooms.js'
 
 const PORT = 3999
 const URL = `http://localhost:${PORT}`
@@ -83,6 +83,46 @@ assert(applyShrink(500, 25) === 375, 'applyShrink: 500m − 25% = 375m')
 assert(applyShrink(25, 50) === 20, 'applyShrink: floor at MIN_ZONE_RADIUS (20m)')
 const distCheck = Math.round(distanceMeters(ZONE, { lat: 52.001, lng: 13.0 }))
 assert(distCheck === 111, 'turf distance: 0.001° lat ≈ 111m', `got ${distCheck}m`)
+
+// Zone drift: distance uniform 0…½r, direction uniform — deterministic rng.
+const noShift = applyZoneShift(ZONE, 500, () => 0)
+assert(noShift.lat === ZONE.lat && noShift.lng === ZONE.lng, 'applyZoneShift: rng 0 → zone stays put')
+const maxShift = applyZoneShift(ZONE, 500, () => 1)
+const maxShiftDist = distanceMeters(ZONE, maxShift)
+assert(Math.abs(maxShiftDist - 250) < 1, 'applyZoneShift: max drift = ½ radius', `got ${maxShiftDist}m`)
+assert(maxShift.lat > ZONE.lat, 'applyZoneShift: bearing 360 → due north')
+
+// shrinkZone wiring: one tick shrinks AND drifts; the pristine center is
+// kept so rematches start back at the host-picked spot.
+const fakeIo = { to: () => ({ emit: () => {} }) }
+const driftRoom = new Room(fakeIo, 'DRIFT', {
+  hostName: 'Zed',
+  role: 'hunter',
+  zoneCenter: ZONE,
+  settings: { initialZoneRadius: 100, zoneShrinkPercent: 10 },
+})
+driftRoom.shrinkZone()
+assert(driftRoom.currentZoneRadius === 90, 'shrinkZone: radius shrinks')
+assert(
+  distanceMeters(ZONE, driftRoom.zoneCenter) <= 45,
+  'shrinkZone: zone drifts at most ½ of the new radius',
+)
+assert(driftRoom.initialZoneCenter.lat === ZONE.lat, 'shrinkZone: pristine center kept for rematches')
+let worstRatio = 0
+let prevCenter = driftRoom.zoneCenter
+for (let i = 0; i < 50; i++) {
+  driftRoom.shrinkZone()
+  worstRatio = Math.max(
+    worstRatio,
+    distanceMeters(prevCenter, driftRoom.zoneCenter) / driftRoom.currentZoneRadius,
+  )
+  prevCenter = driftRoom.zoneCenter
+}
+assert(
+  worstRatio <= 0.5,
+  'shrinkZone: drift ≤ ½ radius per tick (50 ticks)',
+  `worst ${(worstRatio * 100).toFixed(1)}%`,
+)
 
 // ---------------------------------------------------------------- room:create
 
@@ -211,6 +251,7 @@ assert(tick.currentZoneRadius === 50, 'tick: zone radius = initial')
 assert(tick.nextShrinkIn === 30, 'tick: next shrink driven by zoneShrinkInterval')
 assert(tick.nextRevealIn === 60, 'tick: nextRevealIn driven by hiderRevealInterval')
 assert(tick.phase === 'main', 'tick: phase = main (hide phase disabled)')
+assert(tick.zoneCenter && tick.zoneCenter.lat === ZONE.lat, 'tick carries the zone center')
 
 const snapshot = await hunterSnapshot
 assert(Array.isArray(snapshot) && snapshot[0].id === hiderId, 'hunters received initial hider snapshot')

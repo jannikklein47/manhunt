@@ -85,7 +85,7 @@
     <!-- Map -->
     <div class="map-holder" :class="{ 'map-holder--short': status !== 'active' }">
       <GameMap
-        :zone-center="roomState?.zoneCenter"
+        :zone-center="zoneCenter"
         :zone-radius="zoneRadius"
         :hunters="store.hunterPositions"
         :hiders="visibleHiders"
@@ -402,6 +402,7 @@ const screenMaySleep = computed(
 )
 const settings = computed(() => store.settings)
 const zoneRadius = computed(() => store.zoneRadius)
+const zoneCenter = computed(() => store.zoneCenter)
 const myPlayerId = computed(() => store.myPlayerId)
 const isHost = computed(() => store.isHost)
 const amHunter = computed(() => store.amHunter)
