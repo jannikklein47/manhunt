@@ -23,6 +23,10 @@ body {
   // Notched phones (viewport-fit=cover): keep content off the cutouts.
   padding-top: env(safe-area-inset-top);
   padding-bottom: env(safe-area-inset-bottom);
+  // Nothing may widen the layout viewport — horizontal overflow would make
+  // mobile browsers shrink-to-fit (whole page looks zoomed out). `clip`
+  // (not `hidden`) so position: sticky keeps working.
+  overflow-x: clip;
 }
 
 // ------------------------------------------------------------- flat surfaces

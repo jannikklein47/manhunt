@@ -22,7 +22,7 @@
     </q-toolbar>
 
     <!-- HUD: single thumb-scrollable row of flat chips -->
-    <div v-if="status === 'active'" class="hud-row no-scrollbar">
+    <div v-if="status === 'active'" class="hud-row">
       <span v-if="isHiding" class="hud-chip hud-chip--amber">
         <q-icon name="hourglass_top" size="14px" />
         Hide {{ formatClock(tick?.hideRemaining ?? 0) }}
@@ -791,10 +791,11 @@ onBeforeUnmount(() => {
 
 .hud-row {
   display: flex;
+  flex-wrap: wrap; /* chips break to the next line — never wider than the screen */
   gap: 8px;
-  overflow-x: auto;
   margin: 2px 0 8px;
   padding: 2px;
+  max-width: 100%;
 }
 
 .hud-chip {
