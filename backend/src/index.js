@@ -53,7 +53,7 @@ export function createApp() {
         const player = room.assertMember(socket_)
         return fn(room, player)
       } catch (err) {
-        fail(err instanceof GameError ? err.message : 'Something went wrong', ack)
+        fail(err instanceof GameError ? err.message : 'Etwas ist schiefgelaufen', ack)
         return null
       }
     }
@@ -63,7 +63,7 @@ export function createApp() {
     socket.on('room:create', (payload = {}, ack) => {
       try {
         const hostName = String(payload.hostName || '').trim()
-        if (!hostName) throw new GameError('A player name is required')
+        if (!hostName) throw new GameError('Ein Spielername wird benötigt')
         const room = createRoom(io, {
           hostName,
           role: payload.role,
@@ -75,7 +75,7 @@ export function createApp() {
         room.broadcastState()
         ok(ack, { roomState: room.serialize(), yourPlayerId: host.id })
       } catch (err) {
-        fail(err instanceof GameError ? err.message : 'Could not create the room', ack)
+        fail(err instanceof GameError ? err.message : 'Raum konnte nicht erstellt werden', ack)
       }
     })
 
@@ -83,25 +83,25 @@ export function createApp() {
       try {
         const room = getRoom(payload.roomCode)
         const playerName = String(payload.playerName || '').trim()
-        if (!playerName) throw new GameError('A player name is required')
-        if (playerName.length > 24) throw new GameError('Name is too long (max 24 characters)')
+        if (!playerName) throw new GameError('Ein Spielername wird benötigt')
+        if (playerName.length > 24) throw new GameError('Name ist zu lang (maximal 24 Zeichen)')
 
         const byName = [...room.players.values()].find((p) => p.name.toLowerCase() === playerName.toLowerCase())
-        if (byName && byName.connected) throw new GameError('That name is already taken in this room')
+        if (byName && byName.connected) throw new GameError('Dieser Name ist in diesem Raum bereits vergeben')
 
         let player
         if (byName) {
           // Reconnect / page refresh: reuse the existing player entry.
           player = room.reconnectPlayer(byName, socket, payload.role)
         } else {
-          if (room.status !== 'lobby') throw new GameError('The game already started in this room')
+          if (room.status !== 'lobby') throw new GameError('In diesem Raum hat das Spiel bereits begonnen')
           player = room.addPlayer(socket, { name: playerName, role: payload.role })
         }
 
         room.broadcastState()
         ok(ack, { roomState: room.serialize(), yourPlayerId: player.id })
       } catch (err) {
-        fail(err instanceof GameError ? err.message : 'Could not join the room', ack)
+        fail(err instanceof GameError ? err.message : 'Beitritt zum Raum fehlgeschlagen', ack)
       }
     })
 
@@ -121,7 +121,7 @@ export function createApp() {
 
     socket.on('player:set_role', ({ roomCode, role } = {}, ack) => {
       withRoom(roomCode, socket, (room, player) => {
-        if (room.status !== 'lobby') throw new GameError('Role can only be changed in the lobby')
+        if (room.status !== 'lobby') throw new GameError('Rollen können nur in der Lobby geändert werden')
         player.role = role === 'hider' ? 'hider' : 'hunter'
         room.broadcastState()
         ok(ack)

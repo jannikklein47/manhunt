@@ -3,12 +3,12 @@
     <!-- Room header -->
     <q-toolbar class="room-toolbar">
       <q-btn flat round dense icon="logout" @click="leave">
-        <q-tooltip>Leave room</q-tooltip>
+        <q-tooltip>Raum verlassen</q-tooltip>
       </q-btn>
       <q-toolbar-title class="row items-center q-gutter-x-sm">
         <span class="text-weight-bold room-code">{{ roomCode }}</span>
         <q-btn flat round dense size="sm" icon="content_copy" @click="copyCode">
-          <q-tooltip>Copy code &amp; link</q-tooltip>
+          <q-tooltip>Code &amp; Link kopieren</q-tooltip>
         </q-btn>
         <span class="status-pill" :class="`status-pill--${status}`">{{ statusLabel }}</span>
       </q-toolbar-title>
@@ -17,7 +17,7 @@
         :color="store.connected ? 'positive' : 'negative'"
         size="22px"
       >
-        <q-tooltip>{{ store.connected ? 'Connected' : 'Disconnected' }}</q-tooltip>
+        <q-tooltip>{{ store.connected ? 'Verbunden' : 'Getrennt' }}</q-tooltip>
       </q-icon>
     </q-toolbar>
 
@@ -25,7 +25,7 @@
     <div v-if="status === 'active'" class="hud-row">
       <span v-if="isHiding" class="hud-chip hud-chip--amber">
         <q-icon name="hourglass_top" size="14px" />
-        Hide {{ formatClock(tick?.hideRemaining ?? 0) }}
+        Verstecken {{ formatClock(tick?.hideRemaining ?? 0) }}
       </span>
       <span class="hud-chip">
         <q-icon name="timer" size="14px" />
@@ -37,11 +37,11 @@
       </span>
       <span v-if="!isHiding" class="hud-chip hud-chip--orange">
         <q-icon name="compress" size="14px" />
-        Shrink in {{ tick?.nextShrinkIn ?? '–' }} s
+        Schrumpfen in {{ tick?.nextShrinkIn ?? '–' }} s
       </span>
       <span v-if="!isHiding" class="hud-chip hud-chip--purple">
         <q-icon name="visibility" size="14px" />
-        {{ amHunter ? 'Reveal in' : 'Spotted in' }} {{ nextRevealIn }} s
+        {{ amHunter ? 'Aufdecken in' : 'Enttarnung in' }} {{ nextRevealIn }} s
       </span>
       <span class="hud-chip" :class="gpsChipClass">
         <q-icon name="gps_fixed" size="14px" />
@@ -59,11 +59,11 @@
         <q-icon name="directions_run" />
       </template>
       <template v-if="amHider"
-        >GO HIDE! The hunt starts in {{ tick?.hideRemaining ?? 0 }}s.</template
+        >VERSTECK DICH! Die Jagd beginnt in {{ tick?.hideRemaining ?? 0 }} s.</template
       >
       <template v-else
-        >Hiders are taking their positions. The hunt starts in
-        {{ tick?.hideRemaining ?? 0 }}s.</template
+        >Die Verstecker suchen sich ihre Plätze. Die Jagd beginnt in
+        {{ tick?.hideRemaining ?? 0 }} s.</template
       >
     </q-banner>
 
@@ -76,7 +76,7 @@
       <template #avatar>
         <q-icon name="warning" />
       </template>
-      Hunter in range — keep quiet and stay still!
+      Jäger in der Nähe — leise bleiben und nichts bewegen!
     </q-banner>
 
     <!-- Captured banner -->
@@ -84,8 +84,7 @@
       <template #avatar>
         <q-icon name="sports_score" color="negative" />
       </template>
-      You were found by <b>{{ capturerName }}</b
-      >. Enjoy watching the rest of the match.
+      Du wurdest von <b>{{ capturerName }}</b> gefunden. Genieße den Rest des Matches als Zuschauer.
     </q-banner>
 
     <!-- Map -->
@@ -116,12 +115,19 @@
         <!-- Host, lobby only: re-place the zone center on the map -->
         <div v-if="canPickZone" class="map-overlay-panel">
           <q-icon name="my_location" size="16px" color="grey-5">
-            <q-tooltip>Move the zone center</q-tooltip>
+            <q-tooltip>Zentrum der Zone verschieben</q-tooltip>
           </q-icon>
-          <q-toggle v-model="zonePickArmed" dense dark size="sm" label="Move zone" left-label>
+          <q-toggle
+            v-model="zonePickArmed"
+            dense
+            dark
+            size="sm"
+            label="Zone verschieben"
+            left-label
+          >
             <q-tooltip
-              >Lobby only: tap the map to move the zone center for everyone; drag the ◎ marker to
-              fine-tune.</q-tooltip
+              >Nur in der Lobby: Tippe auf die Karte, um das Zentrum für alle zu verschieben; ziehe
+              die ◎ Markierung zum Feinjustieren.</q-tooltip
             >
           </q-toggle>
         </div>
@@ -129,19 +135,19 @@
         <!-- Manual location (testing tool) — off by default -->
         <div class="map-overlay-panel">
           <q-icon name="science" size="16px" color="grey-5">
-            <q-tooltip>Testing tools</q-tooltip>
+            <q-tooltip>Test-Werkzeuge</q-tooltip>
           </q-icon>
           <q-toggle
             v-model="manualEnabledProxy"
             dense
             dark
             size="sm"
-            label="Manual location"
+            label="Manueller Standort"
             left-label
           >
             <q-tooltip
-              >Testing only: replaces your GPS with tap-the-map positioning. Off by default —
-              disable it before a real game.</q-tooltip
+              >Nur zum Testen: ersetzt dein GPS durch Tippen auf der Karte. Standardmäßig aus — vor
+              einem echten Spiel deaktivieren.</q-tooltip
             >
           </q-toggle>
           <q-btn-toggle
@@ -153,14 +159,14 @@
             toggle-color="primary"
             :options="[
               { label: 'GPS', value: false, icon: 'gps_fixed' },
-              { label: 'Manual', value: true, icon: 'touch_app' },
+              { label: 'Manuell', value: true, icon: 'touch_app' },
             ]"
           />
         </div>
       </div>
 
       <q-chip v-if="zonePickArmed" dense class="map-overlay-hint" color="dark" text-grey-3>
-        Tap the map to place the zone center
+        Tippe auf die Karte, um das Zentrum der Zone zu setzen
       </q-chip>
 
       <q-chip
@@ -170,7 +176,7 @@
         color="dark"
         text-grey-3
       >
-        Tap the map to set your position
+        Tippe auf die Karte, um deinen Standort zu setzen
       </q-chip>
 
       <q-chip
@@ -180,7 +186,7 @@
         color="dark"
         text-amber-5
       >
-        Screen may turn off — this browser can't keep it awake
+        Display kann ausgehen — dieser Browser kann es nicht wach halten
       </q-chip>
     </div>
 
@@ -188,21 +194,21 @@
       v-if="status === 'active'"
       class="row items-center q-gutter-x-md text-caption text-grey-6 q-py-xs"
     >
-      <span><span class="legend-dot" style="background: #ff5252" /> Hunters</span>
+      <span><span class="legend-dot" style="background: #ff5252" /> Jäger</span>
       <span v-if="amHunter"
-        ><span class="legend-dot" style="background: #00e676" /> Hiders (snapshot)</span
+        ><span class="legend-dot" style="background: #00e676" /> Verstecker (Snapshot)</span
       >
       <span v-if="amHunter"
-        ><span class="legend-dot" style="background: #ffab00" /> Exposed (live)</span
+        ><span class="legend-dot" style="background: #ffab00" /> Enttarnt (live)</span
       >
-      <span><span class="legend-dot" style="background: #40c4ff" /> You</span>
+      <span><span class="legend-dot" style="background: #40c4ff" /> Du</span>
     </div>
 
     <!-- LOBBY -->
     <template v-if="status === 'lobby'">
       <q-card flat class="q-mt-md">
         <q-card-section class="q-pb-none text-subtitle1 text-weight-medium">
-          Lobby · {{ players.length }} player{{ players.length === 1 ? '' : 's' }}
+          Lobby · {{ players.length }} Spieler
         </q-card-section>
         <q-card-section class="q-pt-sm">
           <q-list dense separator>
@@ -224,20 +230,20 @@
                   >
                     <q-tooltip>Host</q-tooltip>
                   </q-icon>
-                  <q-badge v-if="p.id === myPlayerId" class="q-ml-sm">you</q-badge>
+                  <q-badge v-if="p.id === myPlayerId" class="q-ml-sm">du</q-badge>
                 </q-item-label>
               </q-item-section>
               <q-item-section side>
                 <q-icon name="circle" :color="p.connected ? 'positive' : 'grey-8'" size="10px">
-                  <q-tooltip>{{ p.connected ? 'Connected' : 'Disconnected' }}</q-tooltip>
+                  <q-tooltip>{{ p.connected ? 'Verbunden' : 'Getrennt' }}</q-tooltip>
                 </q-icon>
               </q-item-section>
             </q-item>
           </q-list>
 
           <div class="text-caption text-grey-6 q-mt-sm">
-            Share the code <b>{{ roomCode }}</b> — friends open the app, tap “Join with code” and
-            pick a side.
+            Teile den Code <b>{{ roomCode }}</b> — Freunde öffnen die App, tippen auf „Mit Code
+            beitreten“ und wählen eine Seite.
           </div>
 
           <q-btn-toggle
@@ -249,8 +255,8 @@
             class="q-mt-md"
             toggle-color="primary"
             :options="[
-              { label: 'Play as Hunter', value: 'hunter', icon: 'radar' },
-              { label: 'Play as Hider', value: 'hider', icon: 'visibility_off' },
+              { label: 'Als Jäger spielen', value: 'hunter', icon: 'radar' },
+              { label: 'Als Verstecker spielen', value: 'hider', icon: 'visibility_off' },
             ]"
           />
         </q-card-section>
@@ -265,10 +271,10 @@
     <template v-else-if="status === 'active'">
       <q-card flat class="q-mt-md">
         <q-card-section v-if="amHunter" class="q-gutter-y-sm">
-          <div class="text-subtitle1 text-weight-medium">Hunt in progress</div>
+          <div class="text-subtitle1 text-weight-medium">Jagd läuft</div>
           <div class="text-body2 text-grey-5">
-            Hider positions are revealed every {{ settings?.hiderRevealInterval }} s. Any hider
-            outside the zone is tracked live (orange markers).
+            Verstecker-Positionen werden alle {{ settings?.hiderRevealInterval }} s aufgedeckt.
+            Jeder Verstecker außerhalb der Zone wird live verfolgt (orange Markierungen).
           </div>
           <div>
             <q-chip
@@ -278,16 +284,16 @@
               :text-color="h.captured ? 'grey-4' : 'black'"
               icon="person"
             >
-              {{ h.name }}{{ h.captured ? ' — found' : '' }}
+              {{ h.name }}{{ h.captured ? ' — gefunden' : '' }}
             </q-chip>
           </div>
         </q-card-section>
 
         <q-card-section v-else-if="!me?.captured" class="q-gutter-y-sm">
-          <div class="text-subtitle1 text-weight-medium">Stay hidden</div>
+          <div class="text-subtitle1 text-weight-medium">Bleib versteckt</div>
           <div class="text-body2 text-grey-5">
-            You hear a beep when a hunter gets within {{ settings?.proximityDistanceMeters }} m of
-            you.
+            Du hörst einen Piepton, wenn ein Jäger dir näher als
+            {{ settings?.proximityDistanceMeters }} m kommt.
           </div>
         </q-card-section>
       </q-card>
@@ -303,7 +309,7 @@
             size="48px"
           />
           <div class="text-h5 text-weight-bold">
-            {{ gameOver?.winner === 'hiders' ? 'Hiders win!' : 'Hunters win!' }}
+            {{ gameOver?.winner === 'hiders' ? 'Verstecker gewinnen!' : 'Jäger gewinnen!' }}
           </div>
           <div class="text-body2 text-grey-5">{{ gameOver?.reason }}</div>
         </q-card-section>
@@ -314,7 +320,7 @@
     <q-dialog v-model="captureOpen">
       <q-card dark class="dialog-card">
         <q-card-section>
-          <div class="text-h6">Who found you?</div>
+          <div class="text-h6">Wer hat dich gefunden?</div>
         </q-card-section>
         <q-card-section>
           <q-list separator>
@@ -328,15 +334,15 @@
               <q-item-section avatar>
                 <q-icon name="radar" color="negative" />
               </q-item-section>
-              <q-item-section>Found by {{ h.name }}</q-item-section>
+              <q-item-section>Gefunden von {{ h.name }}</q-item-section>
             </q-item>
           </q-list>
           <div v-if="connectedHunters.length === 0" class="text-caption text-grey-6 q-pa-sm">
-            No hunters connected right now.
+            Gerade ist kein Jäger verbunden.
           </div>
         </q-card-section>
         <q-card-actions align="right">
-          <q-btn flat no-caps label="Cancel" v-close-popup />
+          <q-btn flat no-caps label="Abbrechen" v-close-popup />
         </q-card-actions>
       </q-card>
     </q-dialog>
@@ -351,12 +357,12 @@
             size="56px"
           />
           <div class="text-h5 text-weight-bold">
-            {{ gameOver?.winner === 'hiders' ? 'Hiders win!' : 'Hunters win!' }}
+            {{ gameOver?.winner === 'hiders' ? 'Verstecker gewinnen!' : 'Jäger gewinnen!' }}
           </div>
           <div class="text-body2 text-grey-5">{{ gameOver?.reason }}</div>
         </q-card-section>
         <q-card-actions align="center">
-          <q-btn flat no-caps label="Close" v-close-popup />
+          <q-btn flat no-caps label="Schließen" v-close-popup />
         </q-card-actions>
       </q-card>
     </q-dialog>
@@ -371,7 +377,7 @@
           unelevated
           no-caps
           icon="play_arrow"
-          label="Start game"
+          label="Spiel starten"
           :disable="!canStart"
           @click="start"
         />
@@ -387,7 +393,7 @@
         unelevated
         no-caps
         icon="sports_score"
-        label="I've been found — report capture"
+        label="Ich wurde gefunden — Fang melden"
         @click="captureOpen = true"
       />
       <q-btn
@@ -398,14 +404,14 @@
         unelevated
         no-caps
         icon="replay"
-        label="Back to lobby"
+        label="Zurück zur Lobby"
         @click="reset"
       />
       <div v-else-if="bottomBar === 'waiting'" class="text-body2 text-grey-5 text-center">
-        Waiting for the host to start the game…
+        Warte darauf, dass der Host das Spiel startet…
       </div>
       <div v-else-if="bottomBar === 'ended-wait'" class="text-body2 text-grey-5 text-center">
-        The host can start a rematch.
+        Der Host kann ein Rematch starten.
       </div>
     </div>
   </q-page>
@@ -459,7 +465,7 @@ const tick = computed(() => store.tick)
 const connectedHunters = computed(() => store.hunters.filter((p) => p.connected))
 const capturedIds = computed(() => hiders.value.filter((p) => p.captured).map((p) => p.id))
 const capturerName = computed(
-  () => players.value.find((p) => p.id === me.value?.capturedBy)?.name || 'a hunter',
+  () => players.value.find((p) => p.id === me.value?.capturedBy)?.name || 'einem Jäger',
 )
 
 const canStart = computed(() => {
@@ -472,8 +478,8 @@ const canStart = computed(() => {
 const canStartHint = computed(() => {
   if (canStart.value) return ''
   const active = players.value.filter((p) => p.connected)
-  if (!active.some((p) => p.role === 'hunter')) return 'Need at least one hunter.'
-  if (!active.some((p) => p.role === 'hider')) return 'Need at least one hider.'
+  if (!active.some((p) => p.role === 'hunter')) return 'Mindestens ein Jäger wird gebraucht.'
+  if (!active.some((p) => p.role === 'hider')) return 'Mindestens ein Verstecker wird gebraucht.'
   return ''
 })
 
@@ -557,13 +563,13 @@ const ownDeadPin = computed(() => {
 const nextRevealIn = computed(() => tick.value?.nextRevealIn ?? '–')
 
 const statusLabel = computed(() =>
-  status.value === 'lobby' ? 'LOBBY' : status.value === 'active' ? 'LIVE' : 'ENDED',
+  status.value === 'lobby' ? 'LOBBY' : status.value === 'active' ? 'LIVE' : 'BEENDET',
 )
 
 const gpsChipLabel = computed(() => {
-  if (store.manualMode) return 'Manual'
-  if (store.gpsError) return 'No GPS'
-  if (!store.myPosition) return 'Waiting…'
+  if (store.manualMode) return 'Manuell'
+  if (store.gpsError) return 'Kein GPS'
+  if (!store.myPosition) return 'Warte…'
   return `±${Math.round(store.myPosition.accuracy)} m`
 })
 
@@ -596,10 +602,10 @@ function formatClock(totalSeconds) {
 
 function copyCode() {
   const url = `${window.location.origin}${window.location.pathname}#/room/${roomCode.value}`
-  const text = `Join my Manhunt room: code ${roomCode.value} → ${url}`
+  const text = `Komm in meinen Manhunt-Raum: Code ${roomCode.value} → ${url}`
   navigator.clipboard?.writeText(text).then(
-    () => $q.notify({ type: 'positive', message: 'Code & link copied' }),
-    () => $q.notify({ message: `Room code: ${roomCode.value}` }),
+    () => $q.notify({ type: 'positive', message: 'Code & Link kopiert' }),
+    () => $q.notify({ message: `Raumcode: ${roomCode.value}` }),
   )
 }
 
@@ -640,7 +646,7 @@ onMounted(async () => {
     const name = (localStorage.getItem('manhunt:name') || '').trim()
     const role = localStorage.getItem('manhunt:role') || 'hunter'
     if (!name) {
-      $q.notify({ type: 'warning', message: 'Enter your name first' })
+      $q.notify({ type: 'warning', message: 'Gib zuerst deinen Namen ein' })
       router.replace('/')
       return
     }

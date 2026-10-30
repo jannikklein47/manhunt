@@ -2,7 +2,7 @@
   <q-page class="create-page column q-pb-xl q-px-md">
     <q-toolbar class="q-px-none">
       <q-btn flat round dense icon="arrow_back" @click="router.back()" />
-      <q-toolbar-title>Create a room</q-toolbar-title>
+      <q-toolbar-title>Raum erstellen</q-toolbar-title>
     </q-toolbar>
 
     <div class="row q-col-gutter-lg justify-center">
@@ -11,24 +11,24 @@
         <q-card flat>
           <q-card-section class="row items-center q-py-sm q-gutter-x-sm">
             <q-icon name="my_location" color="primary" size="22px" />
-            <div class="text-subtitle1 text-weight-medium">Safe zone center</div>
+            <div class="text-subtitle1 text-weight-medium">Zentrum der Zone</div>
             <q-space />
             <q-btn
               dense
               no-caps
               unelevated
               icon="gps_fixed"
-              label="Use my GPS"
+              label="Mein GPS nutzen"
               :loading="locating"
               @click="useGps"
             />
           </q-card-section>
 
           <q-banner v-if="!picked" class="pick-hint" dense rounded>
-            Tap the map or press “Use my GPS” to place the zone center ({{
+            Tippe auf die Karte oder nutze „Mein GPS“, um das Zentrum der Zone zu setzen ({{
               settings.initialZoneRadius
             }}
-            m radius).
+            m Radius).
           </q-banner>
 
           <div class="map-holder">
@@ -47,14 +47,14 @@
       <div class="col-12 col-md-6">
         <q-card flat class="q-mb-lg">
           <q-card-section class="q-gutter-y-md">
-            <q-input v-model="playerName" dark filled label="Your name" maxlength="24" counter>
+            <q-input v-model="playerName" dark filled label="Dein Name" maxlength="24" counter>
               <template #prepend>
                 <q-icon name="person" />
               </template>
             </q-input>
 
             <div>
-              <div class="text-caption text-grey-5 q-mb-xs">Your role</div>
+              <div class="text-caption text-grey-5 q-mb-xs">Deine Rolle</div>
               <q-btn-toggle
                 v-model="role"
                 dark
@@ -63,8 +63,8 @@
                 no-caps
                 toggle-color="primary"
                 :options="[
-                  { label: 'Hunter', value: 'hunter', icon: 'radar' },
-                  { label: 'Hider', value: 'hider', icon: 'visibility_off' },
+                  { label: 'Jäger', value: 'hunter', icon: 'radar' },
+                  { label: 'Verstecker', value: 'hider', icon: 'visibility_off' },
                 ]"
               />
             </div>
@@ -80,13 +80,13 @@
           unelevated
           no-caps
           icon="sports_esports"
-          label="Create room &amp; open lobby"
+          label="Raum erstellen &amp; Lobby öffnen"
           :loading="creating"
           :disable="!playerName.trim() || !picked"
           @click="create"
         />
         <div v-if="!picked" class="text-caption text-grey-6 q-mt-sm text-center">
-          Pick a zone center first
+          Zuerst das Zentrum der Zone setzen
         </div>
       </div>
     </div>
@@ -124,7 +124,7 @@ async function useGps() {
     picked.value = { lat: pos.lat, lng: pos.lng }
     fitKey.value++
   } catch (err) {
-    $q.notify({ type: 'negative', message: `GPS failed: ${err.message}` })
+    $q.notify({ type: 'negative', message: `GPS-Fehler: ${err.message}` })
   } finally {
     locating.value = false
   }

@@ -2,9 +2,9 @@
   <q-card flat class="settings-summary">
     <q-card-section class="row items-center q-py-sm q-gutter-x-sm">
       <q-icon name="tune" size="20px" color="primary" />
-      <div class="text-subtitle1 text-weight-medium">Match settings</div>
+      <div class="text-subtitle1 text-weight-medium">Spieleinstellungen</div>
       <q-space />
-      <div class="text-caption text-grey-6">set by the host</div>
+      <div class="text-caption text-grey-6">vom Host festgelegt</div>
     </q-card-section>
 
     <q-card-section class="q-pt-none">

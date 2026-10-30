@@ -24,7 +24,7 @@ const WATCH_OPTIONS = {
  */
 export function watchPosition({ onFix, onError } = {}) {
   if (typeof navigator === 'undefined' || !('geolocation' in navigator)) {
-    onError?.(new Error('Geolocation is not supported by this browser'))
+    onError?.(new Error('Geolokalisierung wird von diesem Browser nicht unterstützt'))
     return () => {}
   }
 
@@ -44,7 +44,7 @@ export function watchPosition({ onFix, onError } = {}) {
 export function currentPosition(timeoutMs = 10000) {
   return new Promise((resolve, reject) => {
     if (typeof navigator === 'undefined' || !('geolocation' in navigator)) {
-      reject(new Error('Geolocation is not supported by this browser'))
+      reject(new Error('Geolokalisierung wird von diesem Browser nicht unterstützt'))
       return
     }
     navigator.geolocation.getCurrentPosition(
@@ -55,7 +55,7 @@ export function currentPosition(timeoutMs = 10000) {
           accuracy: pos.coords.accuracy,
           timestamp: pos.timestamp,
         }),
-      (err) => reject(new Error(err.message || 'Could not get GPS position')),
+      (err) => reject(new Error(err.message || 'GPS-Position konnte nicht ermittelt werden')),
       { ...WATCH_OPTIONS, timeout: timeoutMs },
     )
   })

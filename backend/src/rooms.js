@@ -40,7 +40,7 @@ function generateRoomCode(existing) {
     }
     if (!existing.has(code)) return code
   }
-  throw new GameError('Could not allocate a room code, try again')
+  throw new GameError('Raumcode konnte nicht erstellt werden, bitte erneut versuchen')
 }
 
 function isValidZoneCenter(center) {
@@ -262,7 +262,7 @@ export class Room {
 
   updateSettings(requestedBy, patch) {
     this.assertHost(requestedBy)
-    if (this.status !== 'lobby') throw new GameError('Settings can only be changed in the lobby')
+    if (this.status !== 'lobby') throw new GameError('Einstellungen können nur in der Lobby geändert werden')
     this.settings = mergeSettings(this.settings, patch)
     // Lobby-only: the zone radius preview must follow the slider immediately.
     this.currentZoneRadius = this.settings.initialZoneRadius
@@ -276,8 +276,8 @@ export class Room {
    */
   setZoneCenter(requestedBy, center) {
     this.assertHost(requestedBy)
-    if (this.status !== 'lobby') throw new GameError('Zone can only be moved in the lobby')
-    if (!isValidZoneCenter(center)) throw new GameError('A valid zone center (lat/lng) is required')
+    if (this.status !== 'lobby') throw new GameError('Die Zone kann nur in der Lobby verschoben werden')
+    if (!isValidZoneCenter(center)) throw new GameError('Ein gültiges Zentrum der Zone (lat/lng) wird benötigt')
     this.zoneCenter = { lat: center.lat, lng: center.lng }
     this.initialZoneCenter = { ...this.zoneCenter }
     this.broadcastState()
@@ -285,14 +285,14 @@ export class Room {
   }
 
   assertHost(player) {
-    if (!player || player.id !== this.hostId) throw new GameError('Only the host can do that')
+    if (!player || player.id !== this.hostId) throw new GameError('Nur der Host kann das')
   }
 
   assertMember(socket) {
     const playerId = socket.data?.playerId
     const player = playerId ? this.players.get(playerId) : null
     if (!player || !player.connected || player.socketId !== socket.id) {
-      throw new GameError('You are not part of this room')
+      throw new GameError('Du gehörst nicht zu diesem Raum')
     }
     return player
   }
@@ -301,11 +301,11 @@ export class Room {
 
   start(requestedBy) {
     this.assertHost(requestedBy)
-    if (this.status !== 'lobby') throw new GameError('Game already started')
+    if (this.status !== 'lobby') throw new GameError('Spiel hat bereits begonnen')
 
     const active = this.connectedPlayers()
     if (!active.some((p) => p.role === 'hunter') || !active.some((p) => p.role === 'hider')) {
-      throw new GameError('Need at least one hunter and one hider to start')
+      throw new GameError('Zum Start wird mindestens ein Jäger und ein Verstecker gebraucht')
     }
 
     this.status = 'active'
@@ -387,9 +387,9 @@ export class Room {
     if (this.timeRemaining === 0) {
       const uncaught = this.playersWithRole('hider').filter((p) => !p.captured).length
       if (uncaught > 0) {
-        this.endGame('hiders', `Time ran out — ${uncaught} hider${uncaught === 1 ? '' : 's'} escaped`)
+        this.endGame('hiders', `Zeit abgelaufen — ${uncaught} Verstecker${uncaught === 1 ? ' ist' : ' sind'} entkommen`)
       } else {
-        this.endGame('hunters', 'Time ran out — every hider was already found')
+        this.endGame('hunters', 'Zeit abgelaufen — alle Verstecker wurden bereits gefunden')
       }
     }
   }
@@ -554,15 +554,15 @@ export class Room {
   // -------------------------------------------------------------- capture
 
   captureHider(requestedBy, hiderId, hunterId) {
-    if (this.status !== 'active') throw new GameError('Game is not running')
+    if (this.status !== 'active') throw new GameError('Es läuft kein Spiel')
     // A capture can only be reported by the hider themselves ("Found by" tap).
-    if (requestedBy.id !== hiderId) throw new GameError('Only the hider can report being found')
+    if (requestedBy.id !== hiderId) throw new GameError('Nur der Verstecker selbst kann den Fang melden')
 
     const hider = this.players.get(hiderId)
     const hunter = this.players.get(hunterId)
-    if (!hider || hider.role !== 'hider') throw new GameError('Unknown hider')
-    if (!hunter || hunter.role !== 'hunter') throw new GameError('Unknown hunter')
-    if (hider.captured) throw new GameError('Hider was already captured')
+    if (!hider || hider.role !== 'hider') throw new GameError('Unbekannter Verstecker')
+    if (!hunter || hunter.role !== 'hunter') throw new GameError('Unbekannter Jäger')
+    if (hider.captured) throw new GameError('Verstecker wurde bereits gefangen')
 
     hider.captured = true
     hider.capturedBy = hunterId
@@ -574,7 +574,7 @@ export class Room {
     const remaining = this.playersWithRole('hider').filter((p) => !p.captured).length
     if (remaining === 0) {
       // Single terminal broadcast: state (ended) + game:over, in that order.
-      this.endGame('hunters', `All hiders found — last one caught by ${hunter.name}`)
+      this.endGame('hunters', `Alle Verstecker gefunden — der letzte gefangen von ${hunter.name}`)
     } else {
       // IMMEDIATE DEAD PIN: the found hider's frozen position must reach
       // everyone right away — hunters see the dead pin jump to the capture
@@ -598,7 +598,7 @@ export class Room {
   /** Host extension: reset an ended match back to a fresh lobby. */
   resetToLobby(requestedBy) {
     this.assertHost(requestedBy)
-    if (this.status !== 'ended') throw new GameError('Game has not ended yet')
+    if (this.status !== 'ended') throw new GameError('Das Spiel ist noch nicht vorbei')
     this.status = 'lobby'
     this.phase = 'main'
     this.hideRemaining = 0
@@ -625,7 +625,7 @@ export class Room {
 export const rooms = new Map()
 
 export function createRoom(io, { hostName, zoneCenter, settings, role }) {
-  if (!isValidZoneCenter(zoneCenter)) throw new GameError('A valid zone center (lat/lng) is required')
+  if (!isValidZoneCenter(zoneCenter)) throw new GameError('Ein gültiges Zentrum der Zone (lat/lng) wird benötigt')
   const code = generateRoomCode(rooms)
   const room = new Room(io, code, { hostName, role, zoneCenter, settings })
   rooms.set(code, room)
@@ -634,6 +634,6 @@ export function createRoom(io, { hostName, zoneCenter, settings, role }) {
 
 export function getRoom(code) {
   const room = rooms.get(String(code || '').toUpperCase())
-  if (!room) throw new GameError('Room not found — check the code')
+  if (!room) throw new GameError('Raum nicht gefunden — prüfe den Code')
   return room
 }

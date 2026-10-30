@@ -105,7 +105,7 @@ export const useGameStore = defineStore('game', () => {
     })
 
     socket.on('room:error', (payload) => {
-      lastError.value = payload?.message || 'Unknown error'
+      lastError.value = payload?.message || 'Unbekannter Fehler'
     })
 
     socket.on('room:state_changed', ({ roomState: rs } = {}) => {
@@ -222,7 +222,7 @@ export const useGameStore = defineStore('game', () => {
         if (fix.accuracy <= GPS_REPORT_MAX) sendLocation(fix)
       },
       onError: (err) => {
-        gpsError.value = err.message || 'GPS unavailable'
+        gpsError.value = err.message || 'GPS nicht verfügbar'
       },
     })
   }
@@ -301,7 +301,7 @@ export const useGameStore = defineStore('game', () => {
           myPlayerId.value = res.yourPlayerId
           resolve(res)
         } else {
-          reject(new Error(res?.error || 'Could not create the room'))
+          reject(new Error(res?.error || 'Raum konnte nicht erstellt werden'))
         }
       })
     })
@@ -315,32 +315,32 @@ export const useGameStore = defineStore('game', () => {
           myPlayerId.value = res.yourPlayerId
           resolve(res)
         } else {
-          reject(new Error(res?.error || 'Could not join the room'))
+          reject(new Error(res?.error || 'Beitritt zum Raum fehlgeschlagen'))
         }
       })
     })
   }
 
   function updateSettings(patch) {
-    if (!roomCode.value) return Promise.reject(new Error('Not in a room'))
+    if (!roomCode.value) return Promise.reject(new Error('Nicht in einem Raum'))
     return new Promise((resolve, reject) => {
       socket.emit('room:update_settings', { roomCode: roomCode.value, settings: patch }, (res) => {
         if (res?.ok) resolve(res.settings)
-        else reject(new Error(res?.error || 'Could not update settings'))
+        else reject(new Error(res?.error || 'Einstellungen konnten nicht gespeichert werden'))
       })
     })
   }
 
   /** Host only, lobby only: re-place the zone center. Resolves with the center. */
   function setZoneCenter(center) {
-    if (!roomCode.value) return Promise.reject(new Error('Not in a room'))
+    if (!roomCode.value) return Promise.reject(new Error('Nicht in einem Raum'))
     return new Promise((resolve, reject) => {
       socket.emit(
         'room:set_zone_center',
         { roomCode: roomCode.value, zoneCenter: center },
         (res) => {
           if (res?.ok) resolve(res.zoneCenter)
-          else reject(new Error(res?.error || 'Could not move the zone'))
+          else reject(new Error(res?.error || 'Zone konnte nicht verschoben werden'))
         },
       )
     })
@@ -352,35 +352,35 @@ export const useGameStore = defineStore('game', () => {
   }
 
   function startGame() {
-    if (!roomCode.value) return Promise.reject(new Error('Not in a room'))
+    if (!roomCode.value) return Promise.reject(new Error('Nicht in einem Raum'))
     return new Promise((resolve, reject) => {
       socket.emit('game:start', { roomCode: roomCode.value }, (res) => {
         if (res?.ok) resolve()
-        else reject(new Error(res?.error || 'Could not start the game'))
+        else reject(new Error(res?.error || 'Spiel konnte nicht gestartet werden'))
       })
     })
   }
 
   function resetGame() {
-    if (!roomCode.value) return Promise.reject(new Error('Not in a room'))
+    if (!roomCode.value) return Promise.reject(new Error('Nicht in einem Raum'))
     return new Promise((resolve, reject) => {
       socket.emit('game:reset', { roomCode: roomCode.value }, (res) => {
         if (res?.ok) resolve()
-        else reject(new Error(res?.error || 'Could not reset the game'))
+        else reject(new Error(res?.error || 'Spiel konnte nicht zurückgesetzt werden'))
       })
     })
   }
 
   /** Hiders tap "Found by [Hunter]" — only the hider themselves may report. */
   function captureMe(hunterId) {
-    if (!roomCode.value || !me.value) return Promise.reject(new Error('Not in a room'))
+    if (!roomCode.value || !me.value) return Promise.reject(new Error('Nicht in einem Raum'))
     return new Promise((resolve, reject) => {
       socket.emit(
         'hider:captured',
         { roomCode: roomCode.value, hiderId: myPlayerId.value, hunterId },
         (res) => {
           if (res?.ok) resolve()
-          else reject(new Error(res?.error || 'Could not report the capture'))
+          else reject(new Error(res?.error || 'Fang konnte nicht gemeldet werden'))
         },
       )
     })

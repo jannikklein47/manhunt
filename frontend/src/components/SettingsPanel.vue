@@ -2,14 +2,14 @@
   <q-card flat class="settings-panel">
     <q-card-section class="row items-center q-py-sm q-gutter-x-sm">
       <q-icon name="tune" size="22px" color="primary" />
-      <div class="text-subtitle1 text-weight-medium">Game settings</div>
+      <div class="text-subtitle1 text-weight-medium">Spieleinstellungen</div>
       <q-space />
       <q-btn
         flat
         dense
         no-caps
         icon="restart_alt"
-        label="Defaults"
+        label="Standard"
         :disable="disabled"
         @click="resetToDefaults"
       />
@@ -79,7 +79,7 @@ function resetToDefaults() {
 }
 
 function unitLabel(unit) {
-  if (unit === 'time') return 'sec'
+  if (unit === 'time') return 's'
   return unit
 }
 </script>

@@ -2,7 +2,7 @@
   <q-page class="home-page column items-center q-pa-md">
     <div class="col-shrink text-center q-mb-lg brand-block">
       <div class="brand-title">MANHUNT</div>
-      <div class="text-subtitle1 text-grey-5">Real-time outdoor hide &amp; seek · GPS required</div>
+      <div class="text-subtitle1 text-grey-5">Echtzeit-Verstecken draußen · GPS erforderlich</div>
     </div>
 
     <q-card class="col-shrink action-card" flat>
@@ -11,7 +11,7 @@
           v-model="playerName"
           dark
           filled
-          label="Your name"
+          label="Dein Name"
           maxlength="24"
           counter
           autocomplete="nickname"
@@ -22,7 +22,7 @@
           </template>
         </q-input>
 
-        <div class="text-caption text-grey-5">You will play as</div>
+        <div class="text-caption text-grey-5">Du spielst als</div>
         <q-btn-toggle
           v-model="role"
           dark
@@ -31,8 +31,8 @@
           no-caps
           toggle-color="primary"
           :options="[
-            { label: 'Hunter', value: 'hunter', icon: 'radar' },
-            { label: 'Hider', value: 'hider', icon: 'visibility_off' },
+            { label: 'Jäger', value: 'hunter', icon: 'radar' },
+            { label: 'Verstecker', value: 'hider', icon: 'visibility_off' },
           ]"
         />
 
@@ -43,7 +43,7 @@
           unelevated
           no-caps
           icon="add_circle"
-          label="Create room"
+          label="Raum erstellen"
           :disable="!playerName.trim()"
           @click="goCreate"
         />
@@ -55,29 +55,29 @@
           outline
           no-caps
           icon="login"
-          label="Join with code"
+          label="Mit Code beitreten"
           :disable="!playerName.trim()"
           @click="openJoin"
         />
       </q-card-section>
 
       <q-card-section class="text-caption text-grey-6 q-pt-none">
-        Creating a room makes you the host: you pick the map area and configure the match before
-        inviting friends with a 4-letter code.
+        Wer einen Raum erstellt, ist Host: du wählst das Karten-Gebiet und stellst das Match ein,
+        bevor du Freunde mit einem 4-Buchstaben-Code einlädst.
       </q-card-section>
     </q-card>
 
     <q-dialog v-model="joinOpen" persistent>
       <q-card dark class="join-card">
         <q-card-section>
-          <div class="text-h6">Join a room</div>
+          <div class="text-h6">Raum beitreten</div>
         </q-card-section>
         <q-card-section class="q-gutter-y-md">
           <q-input
             v-model="joinCode"
             dark
             filled
-            label="Room code"
+            label="Raumcode"
             maxlength="4"
             class="code-input"
             autofocus
@@ -95,18 +95,18 @@
             no-caps
             toggle-color="primary"
             :options="[
-              { label: 'Hunter', value: 'hunter', icon: 'radar' },
-              { label: 'Hider', value: 'hider', icon: 'visibility_off' },
+              { label: 'Jäger', value: 'hunter', icon: 'radar' },
+              { label: 'Verstecker', value: 'hider', icon: 'visibility_off' },
             ]"
           />
         </q-card-section>
         <q-card-actions align="right">
-          <q-btn flat no-caps label="Cancel" v-close-popup />
+          <q-btn flat no-caps label="Abbrechen" v-close-popup />
           <q-btn
             unelevated
             no-caps
             color="primary"
-            label="Join"
+            label="Beitreten"
             :loading="joining"
             :disable="joinCode.trim().length < 4"
             @click="join"

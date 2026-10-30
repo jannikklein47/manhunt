@@ -3,7 +3,7 @@
     <div>
       <div style="font-size: 30vh">404</div>
 
-      <div class="text-h2" style="opacity: 0.4">Oops. Nothing here...</div>
+      <div class="text-h2" style="opacity: 0.4">Ups. Hier gibt's nichts…</div>
 
       <q-btn
         class="q-mt-xl"
@@ -11,7 +11,7 @@
         text-color="blue"
         unelevated
         to="/"
-        label="Go Home"
+        label="Zur Startseite"
         no-caps
       />
     </div>

@@ -6,8 +6,8 @@
 export const SETTING_DEFS = [
   {
     key: 'gameDurationSeconds',
-    label: 'Game duration',
-    hint: 'Total match time limit',
+    label: 'Spieldauer',
+    hint: 'Zeitlimit des Matches',
     min: 180,
     max: 3600,
     step: 30,
@@ -16,8 +16,8 @@ export const SETTING_DEFS = [
   },
   {
     key: 'hidePhaseSeconds',
-    label: 'Hiding phase',
-    hint: 'Head start for hiders before the hunt begins (0 = off)',
+    label: 'Versteckphase',
+    hint: 'Vorsprung für Verstecker vor Jagdbeginn (0 = aus)',
     min: 0,
     max: 600,
     step: 5,
@@ -26,8 +26,8 @@ export const SETTING_DEFS = [
   },
   {
     key: 'initialZoneRadius',
-    label: 'Initial zone radius',
-    hint: 'Starting radius of the safe zone',
+    label: 'Anfangs-Radius der Zone',
+    hint: 'Startradius der Sicherheitszone',
     min: 50,
     max: 2000,
     step: 50,
@@ -36,8 +36,8 @@ export const SETTING_DEFS = [
   },
   {
     key: 'zoneShrinkInterval',
-    label: 'Zone shrink interval',
-    hint: 'How often the zone shrinks',
+    label: 'Schrumpf-Intervall',
+    hint: 'Wie oft die Zone schrumpft',
     min: 30,
     max: 600,
     step: 10,
@@ -46,8 +46,8 @@ export const SETTING_DEFS = [
   },
   {
     key: 'zoneShrinkPercent',
-    label: 'Zone shrink amount',
-    hint: 'Radius reduction per shrink tick',
+    label: 'Zonen-Schrumpfung',
+    hint: 'Radius-Reduktion pro Schrumpf-Tick',
     min: 5,
     max: 50,
     step: 1,
@@ -56,8 +56,8 @@ export const SETTING_DEFS = [
   },
   {
     key: 'hiderRevealInterval',
-    label: 'Hider reveal interval',
-    hint: 'How often hider positions are exposed to hunters',
+    label: 'Aufdeckungs-Intervall',
+    hint: 'Wie oft Verstecker-Positionen den Jägern gezeigt werden',
     min: 10,
     max: 300,
     step: 5,
@@ -66,8 +66,8 @@ export const SETTING_DEFS = [
   },
   {
     key: 'proximityDistanceMeters',
-    label: 'Proximity distance',
-    hint: 'Hunter-in-range threshold for hider alerts',
+    label: 'Nähe-Distanz',
+    hint: 'Abstand, ab dem ein Jäger den Verstecker-Alarm auslöst',
     min: 5,
     max: 100,
     step: 1,
@@ -76,8 +76,8 @@ export const SETTING_DEFS = [
   },
   {
     key: 'proximityBeepInterval',
-    label: 'Proximity beep interval',
-    hint: 'Repeat rate of the audio alert while a hunter is in range',
+    label: 'Piep-Intervall',
+    hint: 'Wiederholrate des Alarms, solange ein Jäger in Reichweite ist',
     min: 5,
     max: 60,
     step: 1,
