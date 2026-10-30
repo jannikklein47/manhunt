@@ -163,6 +163,7 @@ function setZone(center, radius) {
       dashArray: '6 6',
       fillColor: COLORS.zone,
       fillOpacity: 0.07,
+      interactive: false, // the zone must not swallow map taps inside it
     }).addTo(map)
     // First render: frame the zone so the player sees the play area at once.
     fitZone()
@@ -230,6 +231,7 @@ function setOwn(pos) {
       weight: 1,
       fillColor: props.ownDead ? COLORS.captured : COLORS.own,
       fillOpacity: 0.12,
+      interactive: false,
     }).addTo(map)
   } else {
     // Glide to the new fix; the accuracy circle rides along in lockstep and
@@ -288,12 +290,7 @@ function redrawMarkers() {
   for (const h of props.hunters) {
     if (h.lat == null || h.lng == null) continue
     seenHunters.add(h.id)
-    upsertMarker(
-      hunterMarkers,
-      h,
-      roleIcon(COLORS.hunter, { glyph: initial(h.name) }),
-      `Hunter ${h.name}`,
-    )
+    upsertMarker(hunterMarkers, h, roleIcon(COLORS.hunter, { glyph: initial(h.name) }))
   }
 
   for (const h of props.hiders) {
@@ -301,7 +298,6 @@ function redrawMarkers() {
     seenHiders.add(h.id)
     const isDead = captured.has(h.id)
     const color = isDead ? COLORS.captured : h.isExposedLive ? COLORS.exposed : COLORS.hider
-    const tooltip = `${h.name}${isDead ? ' (found)' : h.isExposedLive ? ' — LIVE' : ''}`
     upsertMarker(
       hiderMarkers,
       h,
@@ -312,7 +308,6 @@ function redrawMarkers() {
         dead: isDead,
         glyph: initial(h.name),
       }),
-      tooltip,
     )
   }
 
@@ -322,15 +317,14 @@ function redrawMarkers() {
 }
 
 /** Update-or-create a pin; existing pins glide to their new position. */
-function upsertMarker(store, data, icon, tooltip) {
+function upsertMarker(store, data, icon) {
   let marker = store.get(data.id)
   if (!marker) {
-    marker = L.marker([data.lat, data.lng], { icon }).bindTooltip(tooltip).addTo(markerLayer)
+    marker = L.marker([data.lat, data.lng], { icon, interactive: false }).addTo(markerLayer)
     store.set(data.id, marker)
     return
   }
   marker.setIcon(icon)
-  marker.setTooltipContent(tooltip)
   smoothMove(marker, data)
 }
 
