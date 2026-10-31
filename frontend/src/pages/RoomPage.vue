@@ -740,6 +740,10 @@ onBeforeUnmount(() => {
   /* span edge-to-edge despite the page gutters (negative margins) */
   margin: 0 -12px;
   padding: 0 12px;
+  /* Quasar ships `.q-toolbar { width: 100% }` — a definite width that
+     disables flex stretch, so the negative margins would leave a 24px gap
+     on the right. Widen by the gutters the bar bleeds over instead. */
+  width: calc(100% + 24px);
 }
 
 .room-code {
