@@ -149,6 +149,41 @@ assert(
   `got ${pushed.length}`,
 )
 assert(pushed[0]?.payload?.[0]?.isExposedLive === true, 'pushed list flags the hider as exposed live')
+
+// RE-ENTRY: when an exposed hider walks back into the zone, the hunters'
+// pin must STAY where it is — frozen at the last live position they
+// watched — instead of rewinding to an old periodic reveal spot.
+const reSent = []
+const reIo = { to: (id) => ({ emit: (event, payload) => reSent.push({ id, event, payload }) }) }
+const reRoom = new Room(reIo, 'REENT', {
+  hostName: 'Zed',
+  role: 'hunter',
+  zoneCenter: ZONE,
+  settings: { initialZoneRadius: 200, zoneShiftEnabled: false },
+})
+const reHunter = reRoom.players.get(reRoom.hostId)
+reHunter.connected = true
+reHunter.socketId = 'sock-hunter'
+const reHider = reRoom.addPlayer(null, { name: 'Rey', role: 'hider' })
+reHider.connected = true
+reHider.socketId = 'sock-rey'
+// A long-past periodic reveal froze his hunter-view spot at the zone center…
+reHider.revealedLocation = { lat: 52.0, lng: 13.0, accuracy: 5, at: Date.now(), quality: true }
+// …then he left the zone (≈334 m out) and streamed live at 52.003.
+reHider.lastLocation = { lat: 52.003, lng: 13.0, accuracy: 5, at: Date.now(), quality: true }
+reRoom.updateHiderExposure(reHider)
+assert(reHider.isExposedLive === true, 're-entry setup: hider outside is exposed')
+
+reSent.length = 0
+// He steps back inside (≈111 m). The flip-off snapshot must keep the pin at
+// the last watched position — NOT rewind it to the ancient 52.0 reveal.
+reHider.lastLocation = { lat: 52.001, lng: 13.0, accuracy: 5, at: Date.now(), quality: true }
+reRoom.updateHiderExposure(reHider)
+assert(reHider.isExposedLive === false, 're-entry: hider inside is hidden again')
+const reSnapshots = reSent.filter((s) => s.id === 'sock-hunter' && s.event === 'map:hider_positions')
+const reEntry = reSnapshots.at(-1)?.payload?.find((h) => h.id === reHider.id)
+assert(reEntry?.lat === 52.001, 're-entry keeps the pin at the last watched position', `got ${reEntry?.lat}`)
+assert(reEntry?.isExposedLive === false, 're-entry snapshot flips the live flag off')
 let worstRatio = 0
 let prevCenter = driftRoom.zoneCenter
 for (let i = 0; i < 50; i++) {

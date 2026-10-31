@@ -492,9 +492,10 @@ export class Room {
    *   reset): always the latest fix; hiders see their team live.
    * - Hunter view (`forHunters` true): exposed hiders stream their latest
    *   fix and captured hiders carry the capture spot — every OTHER hider
-   *   carries the position of the last periodic reveal (`revealedLocation`),
-   *   so a live update for one exposed hider never re-reveals where the
-   *   currently hidden hiders are right now.
+   *   carries their frozen spot (`revealedLocation`: the last periodic
+   *   reveal, or after re-entry the last live position the hunters
+   *   watched), so a live update for one exposed hider never re-reveals
+   *   where the currently hidden hiders are right now.
    */
   hiderListPayload(forHunters = false) {
     return this.playersWithRole('hider').map((hider) =>
@@ -527,11 +528,18 @@ export class Room {
     const wasExposed = hider.isExposedLive
     hider.isExposedLive = !inZone
 
+    if (wasExposed && !hider.isExposedLive) {
+      // RE-ENTRY: the hunters just watched this hider walk back in — keep
+      // their pin where it is by freezing the hunter-facing spot at his last
+      // live fix. Falling back to the old periodic reveal would rewind the
+      // pin (potentially far) to a position the hunters had long ago.
+      hider.revealedLocation = { ...hider.lastLocation }
+    }
     if (hider.isExposedLive || wasExposed !== hider.isExposedLive) {
       // Live update while outside — only the exposed hider carries fresh
-      // coordinates, everyone else stays at their last periodic reveal.
-      // On re-entry one final update flips the flag; the pin falls back to
-      // the last revealed position (no fresh leak of the re-entry spot).
+      // coordinates, everyone else stays frozen at their last reveal or
+      // re-entry spot. On re-entry one final update flips the flag and
+      // leaves the pin where it is (see above).
       if (this.phase !== 'hiding') this.emitHiderSnapshot()
     }
     if (wasExposed !== hider.isExposedLive) {
