@@ -129,6 +129,7 @@ export class Room {
       connected: false,
       socketId: null,
       lastLocation: null,
+      revealedLocation: null,
       isExposedLive: false,
       inRange: false,
       captured: false,
@@ -322,6 +323,7 @@ export class Room {
       player.inRange = false
       player.isExposedLive = false
       player.lastLocation = null
+      player.revealedLocation = null
     }
 
     // Dynamic timers — the 1 s tick always runs; hider reveals only start
@@ -354,6 +356,12 @@ export class Room {
    * plain `emitHiderSnapshot()` instead.
    */
   revealHiders() {
+    // Freeze what this reveal shows: between periodic reveals, hunter-facing
+    // payloads carry these coordinates — so a live update for ONE exposed
+    // hider can never carry the others' current fixes.
+    for (const hider of this.playersWithRole('hider')) {
+      hider.revealedLocation = hider.lastLocation ? { ...hider.lastLocation } : null
+    }
     this.emitHiderSnapshot()
     this.io.to(this.code).emit('hiders:revealed', { at: Date.now() })
   }
@@ -433,17 +441,33 @@ export class Room {
 
   // ----------------------------------------------------------- visibility
 
-  /** Snapshot of ALL hiders, sent to hunters every `hiderRevealInterval`. */
+  /** Hunter-facing snapshot of ALL hiders — periodic reveals AND the
+   *  exposure-driven live updates. */
   emitHiderSnapshot() {
-    this.emitToRole('hunter', 'map:hider_positions', this.hiderListPayload())
+    this.emitToRole('hunter', 'map:hider_positions', this.hiderListPayload(true))
   }
 
-  hiderListPayload() {
-    return this.playersWithRole('hider').map((hider) => this.hiderPositionPayload(hider, hider.isExposedLive))
+  /**
+   * Full hider list for `map:hider_positions` (clients replace their marker
+   * set wholesale).
+   *
+   * - Team view (`forHunters` false — the hider channel, lobby, after
+   *   reset): always the latest fix; hiders see their team live.
+   * - Hunter view (`forHunters` true): exposed hiders stream their latest
+   *   fix and captured hiders carry the capture spot — every OTHER hider
+   *   carries the position of the last periodic reveal (`revealedLocation`),
+   *   so a live update for one exposed hider never re-reveals where the
+   *   currently hidden hiders are right now.
+   */
+  hiderListPayload(forHunters = false) {
+    return this.playersWithRole('hider').map((hider) =>
+      this.hiderPositionPayload(hider, hider.isExposedLive, forHunters),
+    )
   }
 
-  hiderPositionPayload(hider, isExposedLive) {
-    const loc = hider.lastLocation
+  hiderPositionPayload(hider, isExposedLive, forHunters = false) {
+    const streamsLive = isExposedLive || hider.captured
+    const loc = forHunters && !streamsLive ? hider.revealedLocation : hider.lastLocation
     return {
       id: hider.id,
       name: hider.name,
@@ -467,8 +491,10 @@ export class Room {
     hider.isExposedLive = !inZone
 
     if (hider.isExposedLive || wasExposed !== hider.isExposedLive) {
-      // Live update while outside; one final boundary update when re-entering.
-      // Always the full list so clients can replace their marker set wholesale.
+      // Live update while outside — only the exposed hider carries fresh
+      // coordinates, everyone else stays at their last periodic reveal.
+      // On re-entry one final update flips the flag; the pin falls back to
+      // the last revealed position (no fresh leak of the re-entry spot).
       if (this.phase !== 'hiding') this.emitHiderSnapshot()
     }
   }
@@ -611,6 +637,7 @@ export class Room {
       player.capturedBy = null
       player.inRange = false
       player.isExposedLive = false
+      player.revealedLocation = null
     }
     this.broadcastState()
     // Reopen the lobby WITH everyone's last known position — players are

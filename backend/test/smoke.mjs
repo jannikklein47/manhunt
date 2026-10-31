@@ -485,6 +485,24 @@ const postAlert = once(hiderB, 'player:proximity_alert')
 hunterB.emit('player:location', { lat: 52.02, lng: 13.0, accuracy: 5 })
 assert((await postAlert).inRange === true, 'proximity alerts resume in main phase')
 
+// REGRESSION (over-reveal): Kai fixes his position INSIDE the zone, then
+// exposed Jon sends another fix. The exposure-driven hunter snapshot must
+// carry Jon's live fix but NOT Kai's current one — Kai is not exposed and
+// no periodic reveal has included him yet, so his hunter-view coords stay
+// null (with the over-reveal bug they would leak as his 52.0005 fix).
+hider2B.emit('player:location', { lat: 52.0005, lng: 13.0, accuracy: 5 })
+const noOverReveal = onceWhere(
+  hunterB,
+  'map:hider_positions',
+  (list) => list.some((h) => h.id === hiderBId && h.lat === 52.03),
+)
+hiderB.emit('player:location', { lat: 52.03, lng: 13.0, accuracy: 5 })
+const overRevealList = await noOverReveal
+assert(
+  overRevealList.find((h) => h.id === hider2BId)?.lat === null,
+  'exposure snapshot keeps hidden hiders at their last reveal position',
+)
+
 // DEAD PIN: Jon walks into the zone (exposure flips off → boundary snapshot
 // at 52.4999), then a quiet in-zone fix at 52.4998 that hunters do NOT
 // receive (in-zone hiders only reach hunters via reveals).
