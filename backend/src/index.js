@@ -99,6 +99,9 @@ export function createApp() {
         }
 
         room.broadcastState()
+        // Seamless rejoin: push everything the (re)joining client missed —
+        // position lists for its role + current proximity state.
+        room.sendResync(player, socket)
         ok(ack, { roomState: room.serialize(), yourPlayerId: player.id })
       } catch (err) {
         fail(err instanceof GameError ? err.message : 'Beitritt zum Raum fehlgeschlagen', ack)

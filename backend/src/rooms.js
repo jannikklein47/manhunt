@@ -108,6 +108,9 @@ export class Room {
     this.hideRemaining = 0
     this.players = new Map() // playerId -> Player
     this.hostId = null
+    /** Last `game:over` payload — rides along in room state so a client
+     *  that refreshes after the game still sees the correct result. */
+    this.lastGameOver = null
 
     /** @type {ReturnType<typeof setInterval> | null} */
     this.tickTimer = null
@@ -222,6 +225,35 @@ export class Room {
     }
   }
 
+  /**
+   * SEAMLESS REJOIN: a freshly (re)bound client knows nothing about the
+   * room's live data — broadcasts are change-driven, so in a quiet room the
+   * map would stay empty until someone moves. Push everything the client
+   * needs to resume instantly:
+   * - the position lists for ITS role (hunters in the hiding phase get no
+   *   hider data at all; an active hunter gets the reveal-scoped list; the
+   *   lobby and hider team get the live team list),
+   * - the current proximity state (restores the beep loop mid-alert),
+   * - nothing when the game has ended — pins are wiped at 'ended' and the
+   *   result travels in room state (`gameOver`).
+   */
+  sendResync(player, socket) {
+    if (this.status !== 'lobby' && this.status !== 'active') return
+    socket.emit('map:hunter_positions', this.hunterListPayload())
+    const hunterMustWait =
+      this.status === 'active' && this.phase === 'hiding' && player.role === 'hunter'
+    if (!hunterMustWait) {
+      const revealScoped = this.status === 'active' && player.role === 'hunter'
+      socket.emit('map:hider_positions', this.hiderListPayload(revealScoped))
+    }
+    if (player.role === 'hider') {
+      socket.emit('player:proximity_alert', {
+        inRange: player.inRange,
+        interval: this.settings.proximityBeepInterval,
+      })
+    }
+  }
+
   broadcastState() {
     this.io.to(this.code).emit('room:state_changed', { roomState: this.serialize() })
   }
@@ -255,6 +287,7 @@ export class Room {
       status: this.status,
       phase: this.phase,
       hideRemaining: this.hideRemaining,
+      gameOver: this.lastGameOver ? { ...this.lastGameOver } : null,
       players,
     }
   }
@@ -312,6 +345,7 @@ export class Room {
     this.status = 'active'
     this.elapsed = 0
     this.timeRemaining = this.settings.gameDurationSeconds
+    this.lastGameOver = null
     this.currentZoneRadius = this.settings.initialZoneRadius
     this.zoneCenter = { ...this.initialZoneCenter }
     this.phase = this.settings.hidePhaseSeconds > 0 ? 'hiding' : 'main'
@@ -627,6 +661,7 @@ export class Room {
   endGame(winner, reason) {
     this.clearTimers()
     this.status = 'ended'
+    this.lastGameOver = { winner, reason }
     this.broadcastState()
     this.io.to(this.code).emit('game:over', { winner, reason })
   }
@@ -638,6 +673,7 @@ export class Room {
     this.status = 'lobby'
     this.phase = 'main'
     this.hideRemaining = 0
+    this.lastGameOver = null
     this.elapsed = 0
     this.timeRemaining = this.settings.gameDurationSeconds
     this.currentZoneRadius = this.settings.initialZoneRadius

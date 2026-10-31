@@ -440,6 +440,7 @@ const fitKey = ref(0)
 let errorWatch = null
 let overWatch = null
 let statusWatch = null
+let roomWatch = null
 
 const roomCode = computed(() => route.params.code?.toUpperCase() || '')
 const roomState = computed(() => store.roomState)
@@ -460,7 +461,7 @@ const amHider = computed(() => store.amHider)
 const players = computed(() => store.players)
 const hiders = computed(() => store.hiders)
 const me = computed(() => store.me)
-const gameOver = computed(() => store.gameOver)
+const gameOver = computed(() => store.gameOver || store.roomState?.gameOver || null)
 const tick = computed(() => store.tick)
 
 const connectedHunters = computed(() => store.hunters.filter((p) => p.connected))
@@ -662,14 +663,27 @@ onMounted(async () => {
       router.replace('/')
       return
     }
+    // Seamless rejoin: if the stored room code matches, this is OUR session —
+    // send no role so the server-side entry keeps its current one (a stale
+    // localStorage role must never flip a player mid-game).
+    const isRejoin = localStorage.getItem('manhunt:room') === code
     try {
-      await store.joinRoom({ roomCode: code, playerName: name, role })
+      await store.joinRoom({ roomCode: code, playerName: name, role: isRejoin ? undefined : role })
     } catch (err) {
       $q.notify({ type: 'negative', message: err.message })
       router.replace('/')
       return
     }
   }
+
+  // If the room died under us (failed auto-rejoin after a network drop,
+  // empty-room cleanup), the store resets to 'idle' — bounce home cleanly.
+  roomWatch = watch(
+    () => store.status,
+    (next) => {
+      if (next === 'idle') router.replace('/')
+    },
+  )
 
   store.startTracking()
 
@@ -706,6 +720,7 @@ onBeforeUnmount(() => {
   errorWatch?.()
   overWatch?.()
   statusWatch?.()
+  roomWatch?.()
   store.stopTracking()
 })
 </script>

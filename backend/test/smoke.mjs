@@ -597,6 +597,112 @@ hunterB.disconnect()
 hiderB.disconnect()
 hider2B.disconnect()
 
+// ---------------------------------------------------------------- rejoin (room C)
+// SEAMLESS REJOIN: a dropped socket (no page reload) must resume mid-match
+// with the same player id/role, receive a full data resync (position lists +
+// proximity state), and a rejoin after the game has ended must see the final
+// result — but no position lists (they are wiped at 'ended').
+
+const hostC = await connect('hostC')
+const createdC = await emitAck(hostC, 'room:create', {
+  hostName: 'Zed',
+  role: 'hunter',
+  zoneCenter: ZONE,
+  settings: {
+    gameDurationSeconds: 300,
+    hidePhaseSeconds: 0, // straight into the main phase
+    initialZoneRadius: 200,
+    zoneShiftEnabled: false, // deterministic zone for the exposure math
+  },
+})
+assert(createdC?.ok, 'room C created')
+const codeC = createdC.roomState.code
+
+const hunterC = await connect('hunterC')
+const joinedC1 = await emitAck(hunterC, 'room:join', { roomCode: codeC, playerName: 'Ivy', role: 'hunter' })
+const hunterCId = joinedC1.yourPlayerId
+const hiderC = await connect('hiderC')
+const joinedC2 = await emitAck(hiderC, 'room:join', { roomCode: codeC, playerName: 'Jon', role: 'hider' })
+const hiderCId = joinedC2.yourPlayerId
+assert(joinedC2?.ok, 'hider joined room C')
+
+await emitAck(hostC, 'game:start', { roomCode: codeC })
+hunterC.emit('player:location', { lat: 52.0, lng: 13.0, accuracy: 5 })
+await sleep(200)
+
+// The hider's socket drops WITHOUT a page reload — the store's auto-rejoin
+// path. A fresh socket joins by name only (no role!) and must get the same
+// player entry back plus a full resync of the data it missed while offline.
+hiderC.disconnect()
+await sleep(50)
+const hiderC2 = await connect('hiderC2')
+const resyncHunters = once(hiderC2, 'map:hunter_positions')
+const resyncHiders = once(hiderC2, 'map:hider_positions')
+const resyncProximity = once(hiderC2, 'player:proximity_alert')
+const rejoinedC = await emitAck(hiderC2, 'room:join', { roomCode: codeC, playerName: 'Jon' })
+assert(rejoinedC?.ok, 'rejoin by name (no role) accepted')
+assert(rejoinedC.yourPlayerId === hiderCId, 'rejoin keeps the same player id')
+assert(
+  rejoinedC.roomState.players[hiderCId]?.role === 'hider',
+  'rejoin keeps the server-side role (no role sent)',
+)
+assert(rejoinedC.roomState.players[hiderCId]?.connected === true, 'rejoined player is connected again')
+const huntersResync = await resyncHunters
+assert(huntersResync.some((h) => h.id === hunterCId), 'resync: hunter list arrives for the hider')
+const hidersResync = await resyncHiders
+assert(hidersResync.some((h) => h.id === hiderCId), 'resync: hider team list arrives')
+assert((await resyncProximity).inRange === false, 'resync: current proximity state arrives')
+
+// Mid-match exposure still works after the rejoin: a fix far outside the
+// 200 m zone exposes Jon — the live position reaches the hunter, and the
+// flip reaches the hider himself (own dot turns yellow + waves).
+const exposedToHunter = onceWhere(
+  hunterC,
+  'map:hider_positions',
+  (list) => list.some((h) => h.id === hiderCId && h.lat === 52.005),
+)
+const exposedToSelf = onceWhere(
+  hiderC2,
+  'map:hider_positions',
+  (list) => list.some((h) => h.id === hiderCId && h.isExposedLive === true),
+)
+hiderC2.emit('player:location', { lat: 52.005, lng: 13.0, accuracy: 5 })
+assert((await exposedToHunter).some((h) => h.id === hiderCId && h.isExposedLive === true), 'exposure reaches the hunter after rejoin')
+assert((await exposedToSelf) !== null, 'exposure flip reaches the hider himself after rejoin')
+
+// The single hider is captured → the game ends. Then a rejoin at 'ended'
+// must deliver the final result in room state — and NO position lists
+// (sendResync is silent once the game is over).
+const gameOverC = once(hunterC, 'game:over')
+const capturedC = await emitAck(hiderC2, 'hider:captured', { roomCode: codeC, hiderId: hiderCId, hunterId: hunterCId })
+assert(capturedC?.ok, 'capture accepted after rejoin')
+const overC = await gameOverC
+assert(overC?.winner === 'hunters' && typeof overC.reason === 'string', 'game:over broadcast after rejoin capture')
+
+hiderC2.disconnect()
+await sleep(50)
+const hiderC3 = await connect('hiderC3')
+const noResyncHunters = once(hiderC3, 'map:hunter_positions').then(
+  () => true,
+  () => false,
+)
+const noResyncHiders = once(hiderC3, 'map:hider_positions').then(
+  () => true,
+  () => false,
+)
+const rejoinedEnded = await emitAck(hiderC3, 'room:join', { roomCode: codeC, playerName: 'Jon' })
+assert(rejoinedEnded?.ok, 'rejoin after game end accepted')
+assert(rejoinedEnded.roomState.status === 'ended', 'rejoin at ended: status delivered')
+assert(rejoinedEnded.roomState.players[hiderCId]?.captured === true, 'rejoin at ended: captured state kept')
+assert(rejoinedEnded.roomState.gameOver?.winner === 'hunters', 'rejoin at ended: gameOver result rides in room state')
+await sleep(300)
+assert((await noResyncHunters) === false, 'no hunter list resync at ended')
+assert((await noResyncHiders) === false, 'no hider list resync at ended')
+
+hostC.disconnect()
+hunterC.disconnect()
+hiderC3.disconnect()
+
 // ---------------------------------------------------------------- teardown
 
 host.disconnect()

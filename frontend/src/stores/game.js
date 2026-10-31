@@ -99,6 +99,7 @@ export const useGameStore = defineStore('game', () => {
 
     socket.on('connect', () => {
       connected.value = true
+      rejoinAfterDrop()
     })
     socket.on('disconnect', () => {
       connected.value = false
@@ -293,12 +294,49 @@ export const useGameStore = defineStore('game', () => {
 
   // ----------------------------------------------------------- actions
 
+  /**
+   * SEAMLESS REJOIN: if the socket dropped while we were in a room (network
+   * glitch, tunnel, mobile radio sleep), socket.io reconnects transparently
+   * — but the server still sees us as disconnected and the new socket is not
+   * bound to the room, so nothing would ever arrive again. Re-join silently
+   * with the stored identity; the server answers with a full resync (room
+   * state + position lists + proximity state). No user action needed.
+   */
+  let joinInFlight = false
+
+  function rejoinAfterDrop() {
+    const code = roomState.value?.code
+    if (!code || joinInFlight) return
+    const name = (localStorage.getItem('manhunt:name') || '').trim()
+    if (!name) return
+    joinInFlight = true
+    // Deliberately NO role: the server-side entry already knows it — a stale
+    // localStorage value must never override the current role.
+    socket.emit('room:join', { roomCode: code, playerName: name }, (res) => {
+      joinInFlight = false
+      if (res?.ok) {
+        roomState.value = res.roomState
+        myPlayerId.value = res.yourPlayerId
+        // Position lists + proximity state arrive via the server resync.
+      } else {
+        // The room is gone (empty-room cleanup, server restart): fail
+        // cleanly — the room page bounces home when status flips to 'idle'.
+        lastError.value = res?.error || 'Verbindung zum Raum verloren'
+        resetLocal()
+      }
+    })
+  }
+
   function createRoom({ hostName, role, zoneCenter, settings: patch }) {
     return new Promise((resolve, reject) => {
+      joinInFlight = true
       socket.emit('room:create', { hostName, role, zoneCenter, settings: patch }, (res) => {
+        joinInFlight = false
         if (res?.ok) {
           roomState.value = res.roomState
           myPlayerId.value = res.yourPlayerId
+          localStorage.setItem('manhunt:name', hostName.trim())
+          localStorage.setItem('manhunt:room', res.roomState.code)
           resolve(res)
         } else {
           reject(new Error(res?.error || 'Raum konnte nicht erstellt werden'))
@@ -309,10 +347,14 @@ export const useGameStore = defineStore('game', () => {
 
   function joinRoom({ roomCode, playerName, role }) {
     return new Promise((resolve, reject) => {
+      joinInFlight = true
       socket.emit('room:join', { roomCode, playerName, role }, (res) => {
+        joinInFlight = false
         if (res?.ok) {
           roomState.value = res.roomState
           myPlayerId.value = res.yourPlayerId
+          localStorage.setItem('manhunt:name', playerName.trim())
+          localStorage.setItem('manhunt:room', res.roomState.code)
           resolve(res)
         } else {
           reject(new Error(res?.error || 'Beitritt zum Raum fehlgeschlagen'))
@@ -348,6 +390,7 @@ export const useGameStore = defineStore('game', () => {
 
   function setRole(role) {
     if (!roomCode.value) return
+    localStorage.setItem('manhunt:role', role)
     socket.emit('player:set_role', { roomCode: roomCode.value, role })
   }
 
@@ -405,6 +448,7 @@ export const useGameStore = defineStore('game', () => {
     hiderPositions.value = []
     proximity.value = { inRange: false, interval: null }
     gameOver.value = null
+    localStorage.removeItem('manhunt:room')
   }
 
   function clearError() {
