@@ -23,9 +23,11 @@ export const DEFAULT_SETTINGS = {
   hiderRevealInterval: 60, // seconds between hider position snapshots
   proximityDistanceMeters: 25, // hunter-in-range threshold
   proximityBeepInterval: 30, // seconds between proximity beeps
+  zoneShiftEnabled: true, // does the zone wander on every shrink tick?
 }
 
-const KEYS = Object.keys(DEFAULT_SETTINGS)
+const NUMERIC_KEYS = Object.keys(SETTING_LIMITS)
+const BOOL_KEYS = ['zoneShiftEnabled']
 
 /**
  * Coerce, round to the nearest step and clamp any partial settings object
@@ -35,7 +37,7 @@ export function sanitizeSettings(input = {}) {
   const out = { ...DEFAULT_SETTINGS }
   if (!input || typeof input !== 'object') return out
 
-  for (const key of KEYS) {
+  for (const key of NUMERIC_KEYS) {
     if (input[key] === undefined || input[key] === null) continue
     const raw = Number(input[key])
     if (!Number.isFinite(raw)) continue
@@ -43,6 +45,12 @@ export function sanitizeSettings(input = {}) {
     const { min, max, step } = SETTING_LIMITS[key]
     const stepped = Math.round(raw / step) * step
     out[key] = Math.min(max, Math.max(min, Math.round(stepped)))
+  }
+
+  // Boolean switches: stored as strict booleans.
+  for (const key of BOOL_KEYS) {
+    if (input[key] === undefined || input[key] === null) continue
+    out[key] = Boolean(input[key])
   }
   return out
 }

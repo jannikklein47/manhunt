@@ -106,6 +106,7 @@
         :own-initial="ownInitial"
         :own-dead="amCaptured"
         :own-dead-pin="ownDeadPin"
+        :own-exposed="ownExposed"
         :tap-to-locate="manualLocationActive"
         @locate="store.setManualLocation"
       />
@@ -546,6 +547,17 @@ const visibleHiders = computed(() => {
 })
 
 const ownInitial = computed(() => (store.me?.name || '').trim().charAt(0).toUpperCase())
+
+// This hider is outside the zone: their own dot + accuracy circle turn
+// yellow and the dot waves, like the exposed pins on the hunters' map. The
+// live flag rides on the hider's own entry in the team position list.
+const ownExposed = computed(
+  () =>
+    status.value === 'active' &&
+    amHider.value &&
+    !amCaptured.value &&
+    !!store.hiderPositions.find((h) => h.id === store.myPlayerId)?.isExposedLive,
+)
 
 // Captured hider: dead pin at the found spot + grey live tracking.
 const amCaptured = computed(() => !!store.me?.captured)

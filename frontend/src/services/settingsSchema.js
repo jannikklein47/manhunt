@@ -55,6 +55,13 @@ export const SETTING_DEFS = [
     default: 25,
   },
   {
+    key: 'zoneShiftEnabled',
+    label: 'Zonen-Drift',
+    hint: 'Verschiebt die Zone bei jedem Schrumpfen zufällig weiter',
+    unit: 'bool',
+    default: true,
+  },
+  {
     key: 'hiderRevealInterval',
     label: 'Aufdeckungs-Intervall',
     hint: 'Wie oft Verstecker-Positionen den Jägern gezeigt werden',
@@ -95,6 +102,10 @@ export function clampSettings(input = {}) {
   const out = {}
   for (const def of SETTING_DEFS) {
     if (input[def.key] === undefined) continue
+    if (def.unit === 'bool') {
+      out[def.key] = Boolean(input[def.key])
+      continue
+    }
     const raw = Number(input[def.key])
     if (!Number.isFinite(raw)) continue
     const stepped = Math.round(raw / def.step) * def.step
@@ -103,8 +114,9 @@ export function clampSettings(input = {}) {
   return out
 }
 
-/** Human readable value, e.g. 600s → "10:00", 500 → "500 m", 25 → "25 %". */
+/** Human readable value, e.g. 600s → "10:00", 500 → "500 m", true → "An". */
 export function formatSettingValue(value, unit) {
+  if (unit === 'bool') return value ? 'An' : 'Aus'
   if (unit === 'time') {
     const m = Math.floor(value / 60)
     const s = value % 60

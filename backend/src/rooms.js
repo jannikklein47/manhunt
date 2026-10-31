@@ -404,8 +404,11 @@ export class Room {
 
   shrinkZone() {
     this.currentZoneRadius = applyShrink(this.currentZoneRadius, this.settings.zoneShrinkPercent)
-    // …and it wanders: up to its full (new) radius in a random direction.
-    this.zoneCenter = applyZoneShift(this.zoneCenter, this.currentZoneRadius)
+    // …and it wanders: up to its full (new) radius in a random direction —
+    // but only when the host left the drift enabled.
+    if (this.settings.zoneShiftEnabled) {
+      this.zoneCenter = applyZoneShift(this.zoneCenter, this.currentZoneRadius)
+    }
     // A smaller or moved zone can push hiders outside it → re-evaluate exposure.
     for (const hider of this.playersWithRole('hider')) {
       this.updateHiderExposure(hider)
@@ -496,6 +499,13 @@ export class Room {
       // On re-entry one final update flips the flag; the pin falls back to
       // the last revealed position (no fresh leak of the re-entry spot).
       if (this.phase !== 'hiding') this.emitHiderSnapshot()
+    }
+    if (wasExposed !== hider.isExposedLive) {
+      // The hider must learn about their own exposure flip immediately —
+      // e.g. when the shrinking zone drifts past a stationary hider who
+      // won't send a fresh GPS fix for a while — so their own dot turns
+      // yellow (and waves) the moment it happens.
+      this.emitToRole('hider', 'map:hider_positions', this.hiderListPayload())
     }
   }
 

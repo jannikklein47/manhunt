@@ -17,37 +17,53 @@
 
     <q-card-section class="q-pt-none">
       <div v-for="def in SETTING_DEFS" :key="def.key" class="q-mb-md">
-        <div class="row items-center no-wrap q-mb-xs q-gutter-x-sm">
+        <!-- Boolean switches render as a toggle instead of input + slider. -->
+        <div v-if="def.unit === 'bool'" class="row items-center no-wrap q-gutter-x-sm">
           <div class="col">
             <div class="text-body2 text-weight-medium">{{ def.label }}</div>
             <div class="text-caption text-grey-6">{{ def.hint }}</div>
           </div>
-          <q-input
+          <q-toggle
             :model-value="modelValue[def.key]"
-            type="number"
             dense
-            filled
             dark
             :disable="disabled"
+            @update:model-value="setSetting(def.key, $event)"
+          />
+        </div>
+        <template v-else>
+          <div class="row items-center no-wrap q-mb-xs q-gutter-x-sm">
+            <div class="col">
+              <div class="text-body2 text-weight-medium">{{ def.label }}</div>
+              <div class="text-caption text-grey-6">{{ def.hint }}</div>
+            </div>
+            <q-input
+              :model-value="modelValue[def.key]"
+              type="number"
+              dense
+              filled
+              dark
+              :disable="disabled"
+              :min="def.min"
+              :max="def.max"
+              :step="def.step"
+              class="setting-input"
+              @update:model-value="setSetting(def.key, $event)"
+            />
+            <div class="text-caption text-grey-5 setting-unit">{{ unitLabel(def.unit) }}</div>
+          </div>
+          <q-slider
+            :model-value="modelValue[def.key]"
             :min="def.min"
             :max="def.max"
             :step="def.step"
-            class="setting-input"
+            :disable="disabled"
+            label
+            :label-value="formatSettingValue(modelValue[def.key], def.unit)"
+            color="primary"
             @update:model-value="setSetting(def.key, $event)"
           />
-          <div class="text-caption text-grey-5 setting-unit">{{ unitLabel(def.unit) }}</div>
-        </div>
-        <q-slider
-          :model-value="modelValue[def.key]"
-          :min="def.min"
-          :max="def.max"
-          :step="def.step"
-          :disable="disabled"
-          label
-          :label-value="formatSettingValue(modelValue[def.key], def.unit)"
-          color="primary"
-          @update:model-value="setSetting(def.key, $event)"
-        />
+        </template>
       </div>
     </q-card-section>
   </q-card>

@@ -45,6 +45,11 @@ const props = defineProps({
   ownInitial: { type: String, default: '' },
   /** This player is captured: own dot turns grey, no own reveal wave. */
   ownDead: { type: Boolean, default: false },
+  /**
+   * This hider is outside the zone (exposed live): own dot + accuracy
+   * circle turn yellow and the dot plays the endless wave.
+   */
+  ownExposed: { type: Boolean, default: false },
   /** Where this (captured) player was found — a dead pin on their own map. */
   ownDeadPin: { type: Object, default: null },
   /**
@@ -205,15 +210,24 @@ function setPickedMarker(picked) {
   }
 }
 
-function ownIcon(letter = '', dead = false) {
+function ownIcon(letter = '', dead = false, exposed = false) {
   return L.divIcon({
     className: 'mm-marker-wrap',
-    html: `<div class="mm-own-dot${dead ? ' mm-own-dot--dead' : ''}" style="--mm-color:${
-      dead ? COLORS.captured : COLORS.own
+    html: `<div class="mm-own-dot${dead ? ' mm-own-dot--dead' : ''}${
+      exposed && !dead ? ' mm-own-dot--exposed' : ''
+    }" style="--mm-color:${
+      dead ? COLORS.captured : exposed ? COLORS.exposed : COLORS.own
     }">${letter ? `<span>${letter}</span>` : ''}</div>`,
     iconSize: [20, 20],
     iconAnchor: [10, 10],
   })
+}
+
+/** The color of the viewer's own accuracy circle. */
+function ownColor() {
+  if (props.ownDead) return COLORS.captured
+  if (props.ownExposed) return COLORS.exposed
+  return COLORS.own
 }
 
 function setOwn(pos) {
@@ -221,15 +235,15 @@ function setOwn(pos) {
   if (!ownMarker) {
     // High zIndexOffset keeps the own dot above hunter/hider markers.
     ownMarker = L.marker([pos.lat, pos.lng], {
-      icon: ownIcon(props.ownInitial, props.ownDead),
+      icon: ownIcon(props.ownInitial, props.ownDead, props.ownExposed),
       zIndexOffset: 1000,
       interactive: false,
     }).addTo(map)
     ownAccuracy = L.circle([pos.lat, pos.lng], {
       radius: pos.accuracy || 0,
-      color: props.ownDead ? COLORS.captured : COLORS.own,
+      color: ownColor(),
       weight: 1,
-      fillColor: props.ownDead ? COLORS.captured : COLORS.own,
+      fillColor: ownColor(),
       fillOpacity: 0.12,
       interactive: false,
     }).addTo(map)
@@ -321,11 +335,24 @@ function upsertMarker(store, data, icon) {
   let marker = store.get(data.id)
   if (!marker) {
     marker = L.marker([data.lat, data.lng], { icon, interactive: false }).addTo(markerLayer)
+    marker._mmIconKey = iconKey(icon)
     store.set(data.id, marker)
     return
   }
-  marker.setIcon(icon)
+  // setIcon re-creates the marker's DOM element, which restarts any running
+  // CSS animation (the endless wave/pulse on live pins). Only re-icon when
+  // the icon actually changed — position updates must leave animations be.
+  const key = iconKey(icon)
+  if (marker._mmIconKey !== key) {
+    marker._mmIconKey = key
+    marker.setIcon(icon)
+  }
   smoothMove(marker, data)
+}
+
+/** Stable identity of a rendered icon: its generated markup. */
+function iconKey(icon) {
+  return icon?.options?.html ?? ''
 }
 
 /** Remove pins that are no longer in the payload. */
@@ -418,7 +445,8 @@ function playRevealWave() {
   }
   if (props.waveOwnPin && !props.ownDead && ownMarker) {
     const el = ownMarker.getElement()?.querySelector('.mm-own-dot')
-    if (el) wavedEls.push(el)
+    // Already waving live (exposed) — don't stack/restart the reveal wave.
+    if (el && !el.classList.contains('mm-own-dot--exposed')) wavedEls.push(el)
   }
 
   for (const el of wavedEls) {
@@ -476,7 +504,7 @@ watch(
 watch(
   () => props.ownInitial,
   (letter) => {
-    ownMarker?.setIcon(ownIcon(letter, props.ownDead))
+    ownMarker?.setIcon(ownIcon(letter, props.ownDead, props.ownExposed))
     setOwnDeadPin(props.ownDeadPin)
   },
 )
@@ -484,12 +512,22 @@ watch(
 watch(
   () => props.ownDead,
   (dead) => {
-    ownMarker?.setIcon(ownIcon(props.ownInitial, dead))
+    ownMarker?.setIcon(ownIcon(props.ownInitial, dead, props.ownExposed))
     if (ownAccuracy) {
-      const color = dead ? COLORS.captured : COLORS.own
-      ownAccuracy.setStyle({ color, fillColor: color })
+      ownAccuracy.setStyle({ color: ownColor(), fillColor: ownColor() })
     }
     setOwnDeadPin(props.ownDeadPin)
+  },
+)
+// Exposure turns the hider's own dot + accuracy circle yellow and starts the
+// endless wave; re-entering the zone reverts both.
+watch(
+  () => props.ownExposed,
+  (exposed) => {
+    ownMarker?.setIcon(ownIcon(props.ownInitial, props.ownDead, exposed))
+    if (ownAccuracy) {
+      ownAccuracy.setStyle({ color: ownColor(), fillColor: ownColor() })
+    }
   },
 )
 watch(
@@ -588,6 +626,18 @@ defineExpose({
 /* Captured player: same dot, grey. */
 .mm-own-dot--dead {
   border-color: rgba(255, 255, 255, 0.75);
+}
+
+/* Own dot streaming live (hider outside the zone): endless wave rings,
+   same as the exposed role pins. */
+.mm-own-dot--exposed::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  border: 3px solid var(--mm-color, #ffab00);
+  animation: mm-reveal-wave 1.3s ease-out infinite;
+  pointer-events: none;
 }
 
 .mm-own-dot > span {

@@ -108,6 +108,47 @@ assert(
   'shrinkZone: zone drifts at most 1× of the new radius',
 )
 assert(driftRoom.initialZoneCenter.lat === ZONE.lat, 'shrinkZone: pristine center kept for rematches')
+
+// The drift is a host setting: zoneShiftEnabled: false shrinks without wandering.
+const staticRoom = new Room(fakeIo, 'STATIC', {
+  hostName: 'Zed',
+  role: 'hunter',
+  zoneCenter: ZONE,
+  settings: { initialZoneRadius: 100, zoneShrinkPercent: 10, zoneShiftEnabled: false },
+})
+assert(staticRoom.settings.zoneShiftEnabled === false, 'zoneShiftEnabled: false survives sanitization')
+staticRoom.shrinkZone()
+assert(staticRoom.currentZoneRadius === 90, 'zoneShiftEnabled: false still shrinks the radius')
+assert(
+  staticRoom.zoneCenter.lat === ZONE.lat && staticRoom.zoneCenter.lng === ZONE.lng,
+  'zoneShiftEnabled: false → the zone never wanders',
+)
+
+// Exposure flips must reach the affected hider immediately (their own dot
+// turns yellow and waves) — even for a stationary hider who sends no fresh
+// GPS fix, e.g. when the shrinking zone drifts past them.
+const sent = []
+const recordingIo = {
+  to: (id) => ({ emit: (event, payload) => sent.push({ id, event, payload }) }),
+}
+const pushRoom = new Room(recordingIo, 'PUSH', {
+  hostName: 'Zed',
+  role: 'hunter',
+  zoneCenter: ZONE,
+  settings: { initialZoneRadius: 50, zoneShiftEnabled: false },
+})
+const pushHider = pushRoom.addPlayer(null, { name: 'Pat', role: 'hider' })
+pushHider.connected = true
+pushHider.socketId = 'sock-pat'
+pushHider.lastLocation = { lat: 52.001, lng: 13.0, accuracy: 5, at: Date.now(), quality: true }
+pushRoom.shrinkZone() // 111 m fix vs 50 m zone → exposure flips on
+const pushed = sent.filter((s) => s.id === 'sock-pat' && s.event === 'map:hider_positions')
+assert(
+  pushed.length === 1,
+  'shrink-driven exposure flip pushes the hider list to the hider instantly',
+  `got ${pushed.length}`,
+)
+assert(pushed[0]?.payload?.[0]?.isExposedLive === true, 'pushed list flags the hider as exposed live')
 let worstRatio = 0
 let prevCenter = driftRoom.zoneCenter
 for (let i = 0; i < 50; i++) {
@@ -227,6 +268,18 @@ assert(radiusRs.currentZoneRadius === 150, 'lobby zone preview follows initialZo
 const radiusBack = once(hider, 'room:state_changed')
 await emitAck(host, 'room:update_settings', { roomCode: code, settings: { initialZoneRadius: 50 } })
 assert((await radiusBack).roomState.currentZoneRadius === 50, 'lobby zone preview restored')
+
+// zoneShiftEnabled: boolean setting round-trips through the socket API.
+const shiftState = once(hider, 'room:state_changed')
+const shiftUpdate = await emitAck(host, 'room:update_settings', {
+  roomCode: code,
+  settings: { zoneShiftEnabled: false },
+})
+assert(shiftUpdate?.ok, 'host can update zoneShiftEnabled')
+assert((await shiftState).roomState.settings.zoneShiftEnabled === false, 'zoneShiftEnabled: false stored')
+const shiftBack = once(hider, 'room:state_changed')
+await emitAck(host, 'room:update_settings', { roomCode: code, settings: { zoneShiftEnabled: true } })
+assert((await shiftBack).roomState.settings.zoneShiftEnabled === true, 'zoneShiftEnabled restored')
 
 // ------------------------------------------------------- move the zone center
 
