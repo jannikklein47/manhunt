@@ -6,6 +6,9 @@
 export const SETTING_LIMITS = {
   gameDurationSeconds: { min: 180, max: 3600, step: 30 },
   hidePhaseSeconds: { min: 0, max: 600, step: 5 },
+  endgameDurationSeconds: { min: 30, max: 1200, step: 30 },
+  endgameMinZoneRadius: { min: 20, max: 1000, step: 10 },
+  endgameNoticeSeconds: { min: 10, max: 600, step: 10 },
   initialZoneRadius: { min: 50, max: 2000, step: 50 },
   zoneShrinkInterval: { min: 30, max: 600, step: 10 },
   zoneShrinkPercent: { min: 5, max: 50, step: 1 },
@@ -17,6 +20,10 @@ export const SETTING_LIMITS = {
 export const DEFAULT_SETTINGS = {
   gameDurationSeconds: 600, // 10 minutes
   hidePhaseSeconds: 60, // head start for hiders before the timer starts
+  endgameEnabled: true, // does the match end with an endgame phase?
+  endgameDurationSeconds: 300, // length of the endgame phase (the finale)
+  endgameMinZoneRadius: 100, // radius the zone approaches second by second
+  endgameNoticeSeconds: 90, // minimum warning time: the endgame zone is announced this many seconds before the switch, and every classic shrink inside that window is suspended
   initialZoneRadius: 500, // meters
   zoneShrinkInterval: 150, // seconds between shrink ticks
   zoneShrinkPercent: 25, // % radius removed per shrink tick
@@ -27,7 +34,7 @@ export const DEFAULT_SETTINGS = {
 }
 
 const NUMERIC_KEYS = Object.keys(SETTING_LIMITS)
-const BOOL_KEYS = ['zoneShiftEnabled']
+const BOOL_KEYS = ['zoneShiftEnabled', 'endgameEnabled']
 
 /**
  * Coerce, round to the nearest step and clamp any partial settings object

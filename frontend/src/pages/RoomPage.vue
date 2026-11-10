@@ -27,17 +27,37 @@
         <q-icon name="hourglass_top" size="14px" />
         Verstecken {{ formatClock(tick?.hideRemaining ?? 0) }}
       </span>
-      <span class="hud-chip">
-        <q-icon name="timer" size="14px" />
-        {{ formatClock(tick?.timeRemaining ?? 0) }}
+      <span class="hud-chip" :class="isEndgame ? 'hud-chip--yellow' : ''">
+        <q-icon :name="isEndgame ? 'sports_score' : 'timer'" size="14px" />
+        {{ formatClock(isEndgame ? (tick?.endgameRemaining ?? 0) : (tick?.timeRemaining ?? 0)) }}
       </span>
       <span v-if="!isHiding" class="hud-chip hud-chip--green">
         <q-icon name="adjust" size="14px" />
         Zone {{ Math.round(zoneRadius) }} m
       </span>
-      <span v-if="!isHiding" class="hud-chip hud-chip--orange">
+      <span
+        v-if="!isHiding && !isEndgame && !endgameZone && tick?.nextShrinkIn != null"
+        class="hud-chip hud-chip--orange"
+      >
         <q-icon name="compress" size="14px" />
-        Schrumpfen in {{ tick?.nextShrinkIn ?? '–' }} s
+        Schrumpfen in {{ tick.nextShrinkIn }} s
+      </span>
+      <span
+        v-if="
+          !isHiding &&
+          !isEndgame &&
+          !endgameZone &&
+          tick?.nextShrinkIn == null &&
+          tick?.endgameNoticeIn != null
+        "
+        class="hud-chip hud-chip--yellow"
+      >
+        <q-icon name="sports_score" size="14px" />
+        Endgame-Zone in {{ tick.endgameNoticeIn }} s
+      </span>
+      <span v-if="!isHiding && !isEndgame && endgameZone" class="hud-chip hud-chip--yellow">
+        <q-icon name="sports_score" size="14px" />
+        Endgame in {{ formatClock(tick?.timeRemaining ?? 0) }}
       </span>
       <span v-if="!isHiding" class="hud-chip hud-chip--purple">
         <q-icon name="visibility" size="14px" />
@@ -79,12 +99,32 @@
       Jäger in der Nähe — leise bleiben und nichts bewegen!
     </q-banner>
 
+    <!-- Endgame banner -->
+    <q-banner v-if="isEndgame && !me?.captured" class="banner banner--yellow q-mb-sm" rounded>
+      <template #avatar>
+        <q-icon name="sports_score" />
+      </template>
+      <template v-if="amHider"
+        >ENDGAME! Die Jäger sind jetzt unsichtbar — bleib in der schrumpfenden Zone!</template
+      >
+      <template v-else
+        >ENDGAME! Die Verstecker können dich nicht mehr sehen — dräng die Zone zusammen.</template
+      >
+    </q-banner>
+
     <!-- Captured banner -->
     <q-banner v-if="me?.captured" class="banner banner--grey q-mb-sm" rounded>
       <template #avatar>
         <q-icon name="sports_score" color="negative" />
       </template>
-      Du wurdest von <b>{{ capturerName }}</b> gefunden. Genieße den Rest des Matches als Zuschauer.
+      <template v-if="me?.capturedReason === 'endzone'"
+        >Du hast die Endzone nicht rechtzeitig erreicht — du bist raus. Genieße den Rest des Matches
+        als Zuschauer.</template
+      >
+      <template v-else
+        >Du wurdest von <b>{{ capturerName }}</b> gefunden. Genieße den Rest des Matches als
+        Zuschauer.</template
+      >
     </q-banner>
 
     <!-- Map -->
@@ -92,6 +132,7 @@
       <GameMap
         :zone-center="mapZoneCenter"
         :zone-radius="zoneRadius"
+        :endgame-zone="endgameZone"
         :mode="zonePickArmed ? 'picker' : 'view'"
         :picked="zonePickArmed ? zonePick : null"
         @update:picked="onZonePick"
@@ -486,6 +527,11 @@ const canStartHint = computed(() => {
 })
 
 const isHiding = computed(() => status.value === 'active' && tick.value?.phase === 'hiding')
+const isEndgame = computed(() => status.value === 'active' && tick.value?.phase === 'endgame')
+
+// The announced endgame zone (initial endgame zone before the switch) —
+// server-computed, rides in `game:tick` and in the room state (resync).
+const endgameZone = computed(() => tick.value?.endgameZone ?? roomState.value?.endgameZone ?? null)
 
 // The single thumb-reachable primary action for the current state — pinned to
 // the bottom of the screen (lobby: start, active hider: report capture, …).
@@ -888,6 +934,11 @@ onBeforeUnmount(() => {
   color: #ffd75e;
 }
 
+.hud-chip--yellow {
+  background: rgba(255, 234, 0, 0.14);
+  color: #ffee58;
+}
+
 .banner--amber {
   background: rgba(255, 171, 0, 0.14);
   color: #ffd75e;
@@ -901,6 +952,11 @@ onBeforeUnmount(() => {
 .banner--grey {
   background: var(--mm-surface-strong, rgba(255, 255, 255, 0.09));
   color: rgba(255, 255, 255, 0.75);
+}
+
+.banner--yellow {
+  background: rgba(255, 234, 0, 0.12);
+  color: #ffee58;
 }
 
 .bottom-bar {

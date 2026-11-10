@@ -104,8 +104,18 @@ export class Room {
     this.timeRemaining = this.settings.gameDurationSeconds
     this.elapsed = 0
     this.status = 'lobby' // 'lobby' | 'active' | 'ended'
-    this.phase = 'main' // while active: 'hiding' | 'main'
+    this.phase = 'main' // while active: 'hiding' | 'main' | 'endgame'
     this.hideRemaining = 0
+    /**
+     * Endgame preview, announced in the main phase once no more shrink ticks
+     * lie between "now" and the switch: the frozen zone (center + radius) the
+     * hiders must reach before the endgame begins. Rendered as a second,
+     * pulsating yellow circle on every player's map. Cleared at the switch.
+     * @type {{ lat: number, lng: number, radius: number } | null}
+     */
+    this.endgameZone = null
+    /** Seconds left in the endgame phase (counts down from `endgameDurationSeconds`). */
+    this.endgameRemaining = 0
     this.players = new Map() // playerId -> Player
     this.hostId = null
     /** Last `game:over` payload — rides along in room state so a client
@@ -137,6 +147,9 @@ export class Room {
       inRange: false,
       captured: false,
       capturedBy: null,
+      /** Why the hider is out: 'caught' (reported) or 'endzone' (missed the
+       *  endgame deadline). Only meaningful when `captured` is true. */
+      capturedReason: null,
     }
     this.players.set(player.id, player)
     if (socket) this.bindSocket(player, socket)
@@ -239,7 +252,13 @@ export class Room {
    */
   sendResync(player, socket) {
     if (this.status !== 'lobby' && this.status !== 'active') return
-    socket.emit('map:hunter_positions', this.hunterListPayload())
+    // Endgame: hunters are invisible to hiders — a (re)joining hider gets an
+    // empty list so no stale pins from before the switch can appear.
+    const huntersDark = this.status === 'active' && this.phase === 'endgame'
+    socket.emit(
+      'map:hunter_positions',
+      huntersDark && player.role === 'hider' ? [] : this.hunterListPayload(),
+    )
     const hunterMustWait =
       this.status === 'active' && this.phase === 'hiding' && player.role === 'hunter'
     if (!hunterMustWait) {
@@ -275,6 +294,7 @@ export class Room {
         inRange: player.inRange,
         captured: player.captured,
         capturedBy: player.capturedBy,
+        capturedReason: player.capturedReason,
       }
     }
     return {
@@ -283,6 +303,8 @@ export class Room {
       settings: { ...this.settings },
       zoneCenter: { ...this.zoneCenter },
       currentZoneRadius: this.currentZoneRadius,
+      endgameZone: this.endgameZone ? { ...this.endgameZone } : null,
+      endgameRemaining: this.endgameRemaining,
       timeRemaining: this.timeRemaining,
       status: this.status,
       phase: this.phase,
@@ -350,10 +372,13 @@ export class Room {
     this.zoneCenter = { ...this.initialZoneCenter }
     this.phase = this.settings.hidePhaseSeconds > 0 ? 'hiding' : 'main'
     this.hideRemaining = this.phase === 'hiding' ? this.settings.hidePhaseSeconds : 0
+    this.endgameZone = null
+    this.endgameRemaining = 0
 
     for (const player of this.players.values()) {
       player.captured = false
       player.capturedBy = null
+      player.capturedReason = null
       player.inRange = false
       player.isExposedLive = false
       player.lastLocation = null
@@ -420,8 +445,45 @@ export class Room {
     this.elapsed++
     this.timeRemaining = Math.max(0, this.settings.gameDurationSeconds - this.elapsed)
 
-    if (this.elapsed % this.settings.zoneShrinkInterval === 0) {
+    // ENDGAME PHASE: the classic shrink-and-move is suspended — the zone only
+    // gets smaller every second, approaching the final radius. The match ends
+    // when the endgame countdown hits zero.
+    if (this.phase === 'endgame') {
+      this.endgameRemaining = Math.max(0, this.endgameRemaining - 1)
+      this.approachEndgameRadius()
+      this.emitTick()
+      if (this.endgameRemaining === 0) {
+        const uncaught = this.playersWithRole('hider').filter((p) => !p.captured).length
+        if (uncaught > 0) {
+          this.endGame(
+            'hiders',
+            `Endgame beendet — ${uncaught} Verstecker${uncaught === 1 ? ' ist' : ' sind'} übrig geblieben`,
+          )
+        } else {
+          this.endGame('hunters', 'Endgame beendet — alle Verstecker wurden gefunden')
+        }
+      }
+      return
+    }
+
+    // MAIN PHASE. Once the endgame zone is announced (notice window open),
+    // the classic shrink-and-move is suspended — the announced coming zone
+    // must stay exact until the switch (see announceEndgameZone).
+    const endgameStartsNow = this.endgameStartsNow()
+    if (
+      !endgameStartsNow &&
+      !this.endgameZone &&
+      this.elapsed % this.settings.zoneShrinkInterval === 0
+    ) {
       this.shrinkZone()
+    }
+    this.announceEndgameZone()
+
+    if (endgameStartsNow) {
+      this.beginEndgamePhase()
+      // The endzone check can end the match on the spot — no tick afterwards.
+      if (this.status === 'active') this.emitTick()
+      return
     }
 
     this.emitTick()
@@ -434,6 +496,111 @@ export class Room {
         this.endGame('hunters', 'Zeit abgelaufen — alle Verstecker wurden bereits gefunden')
       }
     }
+  }
+
+  /** Does the endgame switch happen on this tick (main time up, endgame on)? */
+  endgameStartsNow() {
+    return (
+      this.settings.endgameEnabled &&
+      this.settings.endgameDurationSeconds > 0 &&
+      this.timeRemaining === 0
+    )
+  }
+
+  /**
+   * ENDGAME PREVIEW: when the notice window opens (`endgameNoticeSeconds`
+   * before the switch), the coming endgame zone is computed and shown to ALL
+   * players as a second, pulsating yellow circle so every hider has time to
+   * run for it. The coming zone is one classic shrink-and-move — its random
+   * drift is rolled HERE, so the announced preview IS exactly the zone the
+   * switch will apply. The notice window doubles as the guarantee that the
+   * LAST classic shrink happened at least that long before the switch: every
+   * shrink inside the window is suspended (see tick()), so the live zone
+   * stays put from announcement to switch and the prediction is exact.
+   */
+  announceEndgameZone() {
+    if (!this.settings.endgameEnabled || this.endgameZone) return
+    if (this.timeRemaining > this.settings.endgameNoticeSeconds) return
+    const radius = applyShrink(this.currentZoneRadius, this.settings.zoneShrinkPercent)
+    const center = this.settings.zoneShiftEnabled
+      ? applyZoneShift(this.zoneCenter, radius)
+      : { lat: this.zoneCenter.lat, lng: this.zoneCenter.lng }
+    this.endgameZone = { lat: center.lat, lng: center.lng, radius }
+    this.broadcastState()
+  }
+
+  /**
+   * Transition main → endgame: the switch applies the announced coming zone
+   * (one classic shrink-and-move), every hider that failed to enter it before
+   * the switch is out; afterwards the normal match logic continues (reveals,
+   * exposure, proximity) — being outside the zone is no longer instantly
+   * fatal. Hunters go dark for the hiders from here on.
+   */
+  beginEndgamePhase() {
+    const target = this.endgameZone || {
+      lat: this.zoneCenter.lat,
+      lng: this.zoneCenter.lng,
+      radius: this.currentZoneRadius,
+    }
+    this.phase = 'endgame'
+    this.endgameRemaining = this.settings.endgameDurationSeconds
+
+    // THE SWITCH: shrink and move the zone exactly as announced — the yellow
+    // preview becomes the real zone.
+    this.currentZoneRadius = target.radius
+    this.zoneCenter = { lat: target.lat, lng: target.lng }
+
+    for (const hider of this.playersWithRole('hider')) {
+      if (hider.captured || !hider.lastLocation) continue
+      if (distanceMeters(hider.lastLocation, target) > target.radius) {
+        hider.captured = true
+        hider.capturedBy = null
+        hider.capturedReason = 'endzone'
+        if (hider.inRange) {
+          hider.inRange = false
+          this.emitTo(hider, 'player:proximity_alert', {
+            inRange: false,
+            interval: this.settings.proximityBeepInterval,
+          })
+        }
+      }
+    }
+
+    // The preview has done its job — from here the (green) zone itself closes
+    // in, so the yellow circle comes down with the switch.
+    this.endgameZone = null
+
+    // HUNTERS GO DARK: hiders no longer receive hunter positions…
+    this.emitToRole('hider', 'map:hunter_positions', [])
+    // …while everything else keeps flowing: the new dead pins reach the
+    // hunters immediately, the hider team list carries the new outs, and the
+    // state broadcast flips every client into the endgame phase.
+    this.emitHiderSnapshot()
+    this.emitToRole('hider', 'map:hider_positions', this.hiderListPayload())
+
+    // The endzone check can wipe out the LAST hiders — that ends the match
+    // right away, exactly like a reported capture of the final hider would.
+    const remaining = this.playersWithRole('hider').filter((p) => !p.captured).length
+    if (remaining === 0) {
+      this.endGame('hunters', 'Kein Verstecker hat es in die Endzone geschafft')
+      return
+    }
+    this.broadcastState()
+  }
+
+  /**
+   * ENDGAME APPROACH: every second the radius takes one step toward
+   * `endgameMinZoneRadius`, sized so the zone reaches it exactly when the
+   * phase (and thus the match) ends. Normal shrink ticks keep running
+   * alongside — this step recomputes each second, so the target is still hit
+   * on time ("approach": the zone never grows back past the final radius).
+   */
+  approachEndgameRadius() {
+    const min = Math.max(MIN_ZONE_RADIUS, this.settings.endgameMinZoneRadius)
+    const secondsLeft = this.endgameRemaining
+    if (secondsLeft <= 0 || this.currentZoneRadius <= min) return
+    const step = (this.currentZoneRadius - min) / secondsLeft
+    this.currentZoneRadius = Math.max(min, Math.round(this.currentZoneRadius - step))
   }
 
   shrinkZone() {
@@ -469,11 +636,53 @@ export class Room {
       timeRemaining: this.timeRemaining,
       currentZoneRadius: this.currentZoneRadius,
       zoneCenter: { ...this.zoneCenter },
-      nextShrinkIn: this.nextShrinkIn(),
+      endgameZone: this.endgameZone ? { ...this.endgameZone } : null,
+      endgameRemaining: this.endgameRemaining,
+      // null while the next classic shrink is suspended — clients hide the
+      // „Schrumpfen in“ chip instead of counting down to a no-op shrink.
+      nextShrinkIn: this.nextShrinkScheduledIn(),
+      // Seconds until the notice window opens (the preview announcement) —
+      // null while that countdown is not running. Clients show it as the
+      // „Endgame-Zone in“ chip while the shrink countdown is suspended.
+      endgameNoticeIn: this.endgameNoticeScheduledIn(),
       nextRevealIn: this.nextRevealIn(),
       phase: this.phase,
       hideRemaining: this.hideRemaining,
     })
+  }
+
+  /**
+   * Seconds until the next classic shrink — or null while that shrink is
+   * SUSPENDED by the endgame:
+   * - once the endgame preview is announced (and for the whole endgame
+   *   phase), every classic shrink is skipped;
+   * - already BEFORE the announcement: when the notice window would open
+   *   strictly before the next shrink tick, that shrink is suspended too —
+   *   counting down to it would be a lie.
+   * A shrink falling exactly ON the tick the notice window opens still runs
+   * (shrink first, then announcement), so the chip stays honest there.
+   */
+  nextShrinkScheduledIn() {
+    const raw = this.nextShrinkIn()
+    if (!this.settings.endgameEnabled) return raw
+    if (this.endgameZone || this.phase === 'endgame') return null
+    const untilAnnouncement = this.timeRemaining - this.settings.endgameNoticeSeconds
+    if (this.phase === 'main' && untilAnnouncement < raw) return null
+    return raw
+  }
+
+  /**
+   * Seconds until the endgame notice window opens and the coming endgame
+   * zone is announced — or null while that countdown is not running (endgame
+   * disabled, preview already up, or the endgame phase itself). The UI shows
+   * it as the „Endgame-Zone in …“ chip exactly when the shrink countdown is
+   * suspended by the upcoming window (nextShrinkIn null) but the preview is
+   * not up yet — the gap the old chip left blank.
+   */
+  endgameNoticeScheduledIn() {
+    if (!this.settings.endgameEnabled) return null
+    if (this.phase !== 'main' || this.endgameZone) return null
+    return Math.max(0, this.timeRemaining - this.settings.endgameNoticeSeconds)
   }
 
   // ----------------------------------------------------------- visibility
@@ -551,8 +760,15 @@ export class Room {
     }
   }
 
-  /** Hunters are always public — stream their positions to the whole room. */
+  /**
+   * Hunters are public — stream their positions to the whole room. During the
+   * endgame they go dark for the hiders: only the hunter team sees hunters.
+   */
   broadcastHunterPositions() {
+    if (this.status === 'active' && this.phase === 'endgame') {
+      this.emitToRole('hunter', 'map:hunter_positions', this.hunterListPayload())
+      return
+    }
     this.io.to(this.code).emit('map:hunter_positions', this.hunterListPayload())
   }
 
@@ -644,6 +860,7 @@ export class Room {
 
     hider.captured = true
     hider.capturedBy = hunterId
+    hider.capturedReason = 'caught'
     if (hider.inRange) {
       hider.inRange = false
       this.emitTo(hider, 'player:proximity_alert', { inRange: false, interval: this.settings.proximityBeepInterval })
@@ -686,9 +903,12 @@ export class Room {
     this.timeRemaining = this.settings.gameDurationSeconds
     this.currentZoneRadius = this.settings.initialZoneRadius
     this.zoneCenter = { ...this.initialZoneCenter }
+    this.endgameZone = null
+    this.endgameRemaining = 0
     for (const player of this.players.values()) {
       player.captured = false
       player.capturedBy = null
+      player.capturedReason = null
       player.inRange = false
       player.isExposedLive = false
       player.revealedLocation = null

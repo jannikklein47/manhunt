@@ -12,6 +12,8 @@
  *
  * Renders:
  * - the shrinking safe zone (circle)
+ * - the announced endgame zone: a second, pulsating yellow circle in the
+ *   run-up to the endgame phase
  * - live hunter markers (public to everyone)
  * - hider markers for hunters: snapshot positions + live markers while a
  *   hider is exposed outside the zone (pulsing)
@@ -28,6 +30,12 @@ const props = defineProps({
   mode: { type: String, default: 'view' }, // 'view' | 'picker'
   zoneCenter: { type: Object, default: null }, // { lat, lng }
   zoneRadius: { type: Number, default: 0 },
+  /**
+   * Announced endgame zone (initial endgame zone before the switch):
+   * { lat, lng, radius } | null — drawn as a second, pulsating yellow circle
+   * for everyone while the endgame is upcoming.
+   */
+  endgameZone: { type: Object, default: null },
   hunters: { type: Array, default: () => [] },
   hiders: { type: Array, default: () => [] },
   capturedIds: { type: Array, default: () => [] },
@@ -65,6 +73,7 @@ const mapEl = ref(null)
 
 let map = null
 let zoneCircle = null
+let endgameCircle = null
 let pickedMarker = null
 let ownMarker = null
 let ownAccuracy = null
@@ -84,6 +93,7 @@ const COLORS = {
   captured: '#9e9e9e',
   own: '#40c4ff',
   zone: '#00e676',
+  endgame: '#ffea00',
 }
 
 /** First letter of a player name, for the pin glyph. */
@@ -155,6 +165,7 @@ function ensureMap() {
   if (props.mode === 'picker') setPickedMarker(props.picked)
 
   if (props.zoneCenter) setZone(props.zoneCenter, props.zoneRadius)
+  if (props.endgameZone) setEndgameZone(props.endgameZone)
   if (props.myPosition) setOwn(props.myPosition)
 }
 
@@ -185,6 +196,45 @@ function fitZone() {
   } catch {
     // Map not fully initialized yet (no view/size) — the initial setView or
     // the next fitKey bump will frame it.
+  }
+}
+
+/**
+ * The announced endgame zone: a second, pulsating yellow circle shown to ALL
+ * players in the run-up to the switch. Vanishes again at the switch (the
+ * green zone itself starts closing in).
+ */
+function setEndgameZone(z) {
+  if (!map) return
+  if (!z) {
+    endgameCircle?.remove()
+    endgameCircle = null
+    return
+  }
+  if (!endgameCircle) {
+    endgameCircle = L.circle([z.lat, z.lng], {
+      radius: z.radius,
+      color: COLORS.endgame,
+      weight: 3,
+      dashArray: '8 8',
+      fillColor: COLORS.endgame,
+      fillOpacity: 0.08,
+      interactive: false,
+      className: 'mm-endgame-circle', // CSS pulse (see styles below)
+    }).addTo(map)
+    // First appearance: frame current + endgame zone so a hider immediately
+    // sees where to run.
+    try {
+      const bounds = zoneCircle
+        ? zoneCircle.getBounds().extend(endgameCircle.getBounds())
+        : endgameCircle.getBounds()
+      map.fitBounds(bounds, { padding: [28, 28] })
+    } catch {
+      // Map not fully initialized yet — the next fitKey bump frames it.
+    }
+  } else {
+    endgameCircle.setLatLng([z.lat, z.lng])
+    endgameCircle.setRadius(z.radius)
   }
 }
 
@@ -475,6 +525,7 @@ onBeforeUnmount(() => {
   map?.remove()
   map = null
   zoneCircle = null
+  endgameCircle = null
   pickedMarker = null
   ownMarker = null
   ownAccuracy = null
@@ -486,6 +537,10 @@ onBeforeUnmount(() => {
 watch(
   () => [props.zoneCenter, props.zoneRadius],
   ([center, radius]) => setZone(center, radius),
+)
+watch(
+  () => props.endgameZone,
+  (z) => setEndgameZone(z),
 )
 watch(
   () => props.fitKey,
@@ -698,6 +753,25 @@ defineExpose({
   }
   100% {
     box-shadow: 0 0 0 0 rgba(255, 171, 0, 0);
+  }
+}
+
+/* Endgame preview circle: pulsating yellow ring. Leaflet draws vector layers
+ * as SVG paths and sets stroke attributes via setAttribute — CSS animations
+ * override those presentation attributes, so a plain keyframe pulse works. */
+.mm-endgame-circle {
+  animation: mm-endgame-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes mm-endgame-pulse {
+  0%,
+  100% {
+    stroke-opacity: 1;
+    stroke-width: 3px;
+  }
+  50% {
+    stroke-opacity: 0.3;
+    stroke-width: 1.5px;
   }
 }
 </style>

@@ -200,6 +200,284 @@ assert(
   `worst ${(worstRatio * 100).toFixed(1)}%`,
 )
 
+// ---------------------------------------------------------------- endgame phase
+
+// Direct-Room tests (manual ticks, no real timers): the endgame is the last
+// phase — the switch performs one classic shrink-and-move whose result is
+// announced in advance as the pulsating yellow preview, hiders outside that
+// zone are out, hunters go dark, and the zone then only shrinks per second.
+const egSent = []
+const egIo = { to: (id) => ({ emit: (event, payload) => egSent.push({ id, event, payload }) }) }
+const EG_SETTINGS = {
+  gameDurationSeconds: 180,
+  hidePhaseSeconds: 0,
+  initialZoneRadius: 100,
+  zoneShrinkInterval: 30,
+  zoneShrinkPercent: 10,
+  zoneShiftEnabled: false,
+  endgameEnabled: true,
+  endgameDurationSeconds: 60,
+  endgameMinZoneRadius: 20,
+  hiderRevealInterval: 60,
+  proximityDistanceMeters: 5,
+  proximityBeepInterval: 5,
+}
+const egRoom = new Room(egIo, 'EG', {
+  hostName: 'Eva',
+  role: 'hunter',
+  zoneCenter: ZONE,
+  settings: EG_SETTINGS,
+})
+assert(egRoom.settings.endgameEnabled === true, 'endgame: enabled by default')
+assert(egRoom.settings.endgameMinZoneRadius === 20, 'endgameMinZoneRadius setting stored')
+assert(egRoom.settings.endgameNoticeSeconds === 90, 'endgameNoticeSeconds default: 90 s of warning time')
+const egHunter = egRoom.players.get(egRoom.hostId)
+egHunter.connected = true
+egHunter.socketId = 'sock-eg-hunter'
+const egHiderIn = egRoom.addPlayer(null, { name: 'Ina', role: 'hider' })
+egHiderIn.connected = true
+egHiderIn.socketId = 'sock-eg-ina'
+const egHiderOut = egRoom.addPlayer(null, { name: 'Ole', role: 'hider' })
+egHiderOut.connected = true
+egHiderOut.socketId = 'sock-eg-ole'
+egHiderIn.lastLocation = { lat: 52.0, lng: 13.0, accuracy: 5, at: Date.now(), quality: true }
+// Ole sits ≈111 m north — even in the best case (the coming zone drifting
+// straight towards him by its full radius) he stays >53 m outside of it.
+egHiderOut.lastLocation = { lat: 52.001, lng: 13.0, accuracy: 5, at: Date.now(), quality: true }
+
+// Main-phase sweep (elapsed 1…179). Classic shrinks at 30/60/90 take the
+// radius 100 → 73; at 90 the notice window (90 s) opens: the coming endgame
+// zone is announced and every further classic shrink is suspended.
+egRoom.status = 'active'
+egRoom.phase = 'main'
+egRoom.timeRemaining = 180
+for (let i = 0; i < 89; i++) egRoom.tick()
+assert(egRoom.endgameZone === null, 'no preview before the notice window opens')
+egRoom.tick() // elapsed 90 — timeRemaining 90 = endgameNoticeSeconds
+assert(
+  egRoom.endgameZone?.radius === 66,
+  'endgame preview announced when the notice window opens: the coming zone after one classic shrink',
+  `radius ${egRoom.endgameZone?.radius}`,
+)
+assert(
+  distanceMeters(egRoom.zoneCenter, egRoom.endgameZone) === 0,
+  'preview center: drift disabled → the coming zone stays at the live center',
+)
+for (let i = 0; i < 89; i++) egRoom.tick()
+assert(
+  egRoom.currentZoneRadius === 73,
+  'live zone stays put while the preview is up (classic shrinking suspended)',
+)
+const egPreviewState = egSent.filter((s) => s.event === 'room:state_changed').at(-1)?.payload?.roomState
+assert(egPreviewState?.endgameZone?.radius === 66, 'endgame preview rides in room state (resync)')
+assert(egPreviewState?.phase === 'main', 'preview is announced during the main phase')
+
+// THE SWITCH: main time up — the announced coming zone becomes the real zone
+// (classic shrink-and-move), hiders outside it are out.
+const egPreview = { ...egRoom.endgameZone }
+egSent.length = 0
+egRoom.tick()
+assert(egRoom.phase === 'endgame', 'endgame phase begins when the main time is up')
+assert(egRoom.endgameRemaining === 60, 'endgame countdown starts at the configured length')
+assert(
+  egRoom.currentZoneRadius === egPreview.radius,
+  'the switch performs the announced classic shrink',
+)
+assert(
+  egRoom.zoneCenter.lat === egPreview.lat && egRoom.zoneCenter.lng === egPreview.lng,
+  'the switch moves the zone to the announced spot',
+)
+assert(egRoom.endgameZone === null, 'the yellow preview circle comes down at the switch')
+assert(egHiderOut.captured === true, 'hider outside the endgame zone is out at the switch')
+assert(egHiderOut.capturedReason === 'endzone', 'endzone elimination carries its reason')
+assert(egHiderOut.capturedBy === null, 'endzone elimination has no capturer')
+assert(egHiderIn.captured === false, 'hider inside the endgame zone survives the switch')
+assert(
+  egSent.some((s) => s.id === 'sock-eg-ina' && s.event === 'map:hunter_positions' && s.payload.length === 0),
+  'hunters go dark: hiders receive an empty hunter list at the switch',
+)
+assert(
+  egSent.some((s) => s.id === 'sock-eg-ole' && s.event === 'map:hunter_positions' && s.payload.length === 0),
+  'eliminated hider also loses the hunter pins',
+)
+
+// During the endgame a hunter fix must never reach the hiders anymore.
+egSent.length = 0
+egRoom.handleLocation(egHunter, { lat: egPreview.lat, lng: egPreview.lng, accuracy: 5 })
+assert(
+  egSent.every((s) => !(s.id === 'EG' && s.event === 'map:hunter_positions')),
+  'hunter fixes are never broadcast room-wide during the endgame',
+)
+assert(
+  egSent.some((s) => s.id === 'sock-eg-hunter' && s.event === 'map:hunter_positions'),
+  'hunters still see each other during the endgame',
+)
+
+// During the endgame the classic shrink-and-move is suspended: the center
+// never moves again and the radius only follows the per-second approach.
+const egCenterAtSwitch = { ...egRoom.zoneCenter }
+for (let i = 0; i < 30; i++) egRoom.tick()
+assert(
+  egRoom.zoneCenter.lat === egCenterAtSwitch.lat && egRoom.zoneCenter.lng === egCenterAtSwitch.lng,
+  'classic shrink-and-move is suspended during the endgame (center frozen)',
+)
+assert(
+  egRoom.currentZoneRadius < 66 && egRoom.currentZoneRadius >= 20,
+  'endgame: the zone shrinks second by second toward the final radius',
+  `radius ${egRoom.currentZoneRadius}`,
+)
+for (let i = 0; i < 30; i++) egRoom.tick()
+assert(
+  egRoom.currentZoneRadius === 20,
+  'endgame zone reaches the configured final radius',
+  `radius ${egRoom.currentZoneRadius}`,
+)
+assert(
+  egRoom.endgameRemaining === 0 && egRoom.status === 'ended',
+  'the match ends when the endgame countdown hits zero',
+)
+const egOver = egSent.find((s) => s.event === 'game:over')?.payload
+assert(
+  egOver?.winner === 'hiders' && /Endgame/.test(egOver?.reason || ''),
+  'endgame end: surviving hiders win',
+  JSON.stringify(egOver),
+)
+
+// The switch's classic MOVE: with drift enabled the announced center wanders
+// up to the new radius away from the live zone — and is applied exactly.
+const eg3Room = new Room(egIo, 'EG3', {
+  hostName: 'Eva',
+  role: 'hunter',
+  zoneCenter: ZONE,
+  settings: { ...EG_SETTINGS, zoneShiftEnabled: true },
+})
+eg3Room.status = 'active'
+eg3Room.phase = 'main'
+eg3Room.timeRemaining = 180
+for (let i = 0; i < 179; i++) eg3Room.tick()
+const eg3Preview = { ...eg3Room.endgameZone }
+const eg3CenterBefore = { ...eg3Room.zoneCenter }
+assert(
+  distanceMeters(eg3CenterBefore, eg3Preview) <= eg3Preview.radius,
+  'preview center: drift rolls up to 1× the new radius away from the live zone',
+  `got ${distanceMeters(eg3CenterBefore, eg3Preview)}m vs ${eg3Preview.radius}m`,
+)
+eg3Room.tick()
+assert(
+  eg3Room.zoneCenter.lat === eg3Preview.lat && eg3Room.zoneCenter.lng === eg3Preview.lng,
+  'the switch moves the zone to the announced spot (drift applied)',
+)
+assert(
+  eg3Room.currentZoneRadius === eg3Preview.radius,
+  'the switch performs the announced classic shrink (drift case)',
+)
+
+// Chip honesty BEFORE the announcement: when the notice window would open
+// before the next shrink tick, that shrink is suspended already — the tick
+// payload reports `nextShrinkIn: null` from that moment on, so the UI hides
+// the „Schrumpfen in“ chip instead of counting down to a no-op shrink.
+// Scenario: next shrink in 30 s, 10 s later the notice appears → hidden now.
+// (Window: timeRemaining ≤ 80 → elapsed 100; shrinks at 30/60/90 still run.)
+const eg4Room = new Room(egIo, 'EG4', {
+  hostName: 'Eva',
+  role: 'hunter',
+  zoneCenter: ZONE,
+  settings: { ...EG_SETTINGS, endgameNoticeSeconds: 80 },
+})
+eg4Room.status = 'active'
+eg4Room.phase = 'main'
+eg4Room.timeRemaining = 180
+const eg4Tick = () => egSent.filter((s) => s.id === 'EG4' && s.event === 'game:tick').at(-1)?.payload
+egSent.length = 0
+for (let i = 0; i < 85; i++) eg4Room.tick() // elapsed 85 — shrink in 5 s, window in 15 s
+assert(
+  eg4Tick()?.nextShrinkIn === 5,
+  'chip: the next shrink still runs when the notice window opens after it',
+  `nextShrinkIn ${eg4Tick()?.nextShrinkIn}`,
+)
+assert(
+  eg4Tick()?.endgameNoticeIn === 15,
+  'chip: the notice countdown runs in parallel (endgameNoticeIn)',
+  `endgameNoticeIn ${eg4Tick()?.endgameNoticeIn}`,
+)
+for (let i = 0; i < 6; i++) eg4Room.tick() // elapsed 91 — the elapsed-90 shrink ran, window in 9 s
+assert(eg4Room.endgameZone === null, 'chip: the preview is not up yet while the shrink is suspended')
+assert(
+  eg4Tick()?.nextShrinkIn === null,
+  'chip: the upcoming notice window suspends the next shrink — nextShrinkIn is null already',
+  `nextShrinkIn ${eg4Tick()?.nextShrinkIn}`,
+)
+assert(
+  eg4Tick()?.endgameNoticeIn === 9,
+  'chip: in the suspended gap the tick counts down to the notice instead',
+  `endgameNoticeIn ${eg4Tick()?.endgameNoticeIn}`,
+)
+for (let i = 0; i < 9; i++) eg4Room.tick() // elapsed 100 — the notice window opens
+assert(
+  eg4Room.endgameZone?.radius === 66,
+  'chip: the window opens on schedule and the preview appears',
+  `radius ${eg4Room.endgameZone?.radius}`,
+)
+assert(
+  eg4Tick()?.endgameNoticeIn === null,
+  'chip: with the preview up, the notice countdown hands over to the Endgame-in chip',
+  `endgameNoticeIn ${eg4Tick()?.endgameNoticeIn}`,
+)
+assert(
+  eg4Tick()?.nextShrinkIn === null,
+  'chip: once announced, nextShrinkIn stays null through the endgame',
+)
+
+// Endzone wipe-out: if the switch eliminates the LAST hiders, the match ends
+// right away — exactly like a reported capture of the final hider would.
+const eg2Room = new Room(egIo, 'EG2', {
+  hostName: 'Eva',
+  role: 'hunter',
+  zoneCenter: ZONE,
+  settings: EG_SETTINGS,
+})
+const eg2Hider = eg2Room.addPlayer(null, { name: 'Ole', role: 'hider' })
+eg2Hider.connected = true
+eg2Hider.socketId = 'sock-eg2-ole'
+// ≈111 m north — outside the zone at every point of this match.
+eg2Hider.lastLocation = { lat: 52.001, lng: 13.0, accuracy: 5, at: Date.now(), quality: true }
+eg2Room.status = 'active'
+eg2Room.phase = 'main'
+eg2Room.timeRemaining = 180
+egSent.length = 0
+for (let i = 0; i < 180; i++) eg2Room.tick()
+assert(eg2Room.status === 'ended', 'endzone wipe-out: the match ends at the switch')
+const eg2Over = egSent.find((s) => s.event === 'game:over')?.payload
+assert(
+  eg2Over?.winner === 'hunters' && /Endzone/.test(eg2Over?.reason || ''),
+  'endzone wipe-out: hunters win immediately',
+  JSON.stringify(eg2Over),
+)
+
+// Endgame OFF: no preview, and time-up ends the match like it always did.
+const egOffRoom = new Room(egIo, 'EGOFF', {
+  hostName: 'Zed',
+  role: 'hunter',
+  zoneCenter: ZONE,
+  settings: {
+    gameDurationSeconds: 180,
+    endgameEnabled: false,
+    endgameDurationSeconds: 9999,
+    endgameMinZoneRadius: 5,
+    endgameNoticeSeconds: 3,
+  },
+})
+assert(egOffRoom.settings.endgameEnabled === false, 'endgame can be disabled')
+assert(egOffRoom.settings.endgameDurationSeconds === 1200, 'endgameDurationSeconds clamped to max')
+assert(egOffRoom.settings.endgameMinZoneRadius === 20, 'endgameMinZoneRadius clamped to min')
+assert(egOffRoom.settings.endgameNoticeSeconds === 10, 'endgameNoticeSeconds clamped to min')
+egOffRoom.status = 'active'
+egOffRoom.phase = 'main'
+egOffRoom.elapsed = 179
+egOffRoom.tick()
+assert(egOffRoom.status === 'ended', 'endgame disabled: time-up ends the match as before')
+assert(egOffRoom.phase === 'main' && egOffRoom.endgameZone === null, 'endgame disabled: no endgame phase, no preview')
+
 // ---------------------------------------------------------------- room:create
 
 const host = await connect('host')
@@ -315,6 +593,27 @@ assert((await shiftState).roomState.settings.zoneShiftEnabled === false, 'zoneSh
 const shiftBack = once(hider, 'room:state_changed')
 await emitAck(host, 'room:update_settings', { roomCode: code, settings: { zoneShiftEnabled: true } })
 assert((await shiftBack).roomState.settings.zoneShiftEnabled === true, 'zoneShiftEnabled restored')
+
+// endgame settings round-trip through the socket API (sanitized server-side).
+const egState = once(hider, 'room:state_changed')
+const egUpdate = await emitAck(host, 'room:update_settings', {
+  roomCode: code,
+  settings: { endgameDurationSeconds: 9999, endgameMinZoneRadius: 3, endgameNoticeSeconds: 9999 },
+})
+assert(egUpdate?.ok, 'host can update endgame settings')
+const egSettingsRs = (await egState).roomState.settings
+assert(
+  egSettingsRs.endgameDurationSeconds === 1200 &&
+    egSettingsRs.endgameMinZoneRadius === 20 &&
+    egSettingsRs.endgameNoticeSeconds === 600,
+  'endgame settings clamped server-side',
+)
+const egBack = once(hider, 'room:state_changed')
+await emitAck(host, 'room:update_settings', {
+  roomCode: code,
+  settings: { endgameDurationSeconds: 300, endgameMinZoneRadius: 100, endgameNoticeSeconds: 90 },
+})
+assert((await egBack).roomState.settings.endgameMinZoneRadius === 100, 'endgame settings restored')
 
 // ------------------------------------------------------- move the zone center
 
@@ -455,7 +754,9 @@ assert(captured?.ok, 'hider capture accepted')
 const overPayload = await over
 assert(overPayload.winner === 'hunters', 'hunters win when all hiders captured')
 assert(typeof overPayload.reason === 'string' && overPayload.reason.length > 0, 'game:over carries a reason')
-assert((await endedState).roomState.status === 'ended', 'status → ended')
+const endedRs = (await endedState).roomState
+assert(endedRs.status === 'ended', 'status → ended')
+assert(endedRs.players[hiderId]?.capturedReason === 'caught', 'reported capture carries the caught reason')
 
 // ---------------------------------------------------------------- leave after game end
 
