@@ -41,4 +41,8 @@ export const api = {
   matches: () => get('/api/matches').then((b) => b.matches ?? []),
   /** One match with its full event stream: { match, events }. */
   match: (id) => get(`/api/matches/${id}`),
+  /** Leaderboard: per-player stats aggregated over all matches. */
+  leaderboard: () => get('/api/leaderboard').then((b) => b.leaderboard ?? []),
+  /** One player's stats + recent matches, keyed by (case-insensitive) name. */
+  player: (name) => get(`/api/players/${encodeURIComponent(name)}`),
 }

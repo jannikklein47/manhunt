@@ -7,6 +7,7 @@
  */
 import { createApp } from '../src/index.js'
 import { createReplayService } from '../src/replay/index.js'
+import { summarizePlayers } from '../src/replay/stats.js'
 import { io } from 'socket.io-client'
 import { applyShrink, applyZoneShift, distanceMeters, Room } from '../src/rooms.js'
 
@@ -1048,6 +1049,7 @@ function memoryStore() {
   return {
     matches: new Map(),
     events: new Map(),
+    statsByMatch: new Map(), // matchId → [{ playerId, name, … }]
     async init() {},
     async insertMatch(m) {
       this.matches.set(m.id, { ...m, endedAt: null, winner: null, reason: null, eventCount: 0 })
@@ -1060,6 +1062,135 @@ function memoryStore() {
     async finishMatch(matchId, patch) {
       const m = this.matches.get(matchId)
       if (m) Object.assign(m, patch)
+    },
+    async insertPlayerStats(matchId, rows) {
+      this.statsByMatch.set(matchId, rows.map((r) => ({ ...r })))
+    },
+    async matchesWithoutStats() {
+      return [...this.matches.values()]
+        .filter((m) => m.endedAt && !(this.statsByMatch.get(m.id)?.length > 0))
+        .map((m) => m.id)
+    },
+    async leaderboard({ limit = 100 } = {}) {
+      const byName = new Map()
+      for (const rows of this.statsByMatch.values()) {
+        for (const r of rows) {
+          const key = String(r.name ?? '').trim().toLowerCase()
+          const agg =
+            byName.get(key) ??
+            byName
+              .set(key, {
+                key,
+                name: String(r.name ?? '').trim(),
+                matches: 0,
+                wins: 0,
+                hiderMatches: 0,
+                hunterMatches: 0,
+                timesCaught: 0,
+                timesSurvived: 0,
+                captures: 0,
+                catchPctSum: 0,
+                exposures: 0,
+                distanceM: 0,
+                survivedPcts: [],
+              })
+              .get(key)
+          agg.matches++
+          if (r.won) agg.wins++
+          if (r.role === 'hider') {
+            agg.hiderMatches++
+            agg.survivedPcts.push(r.survivedPct ?? 0)
+          } else {
+            agg.hunterMatches++
+          }
+          if (r.role === 'hider' && r.captured) agg.timesCaught++
+          if (r.role === 'hider' && r.survived) agg.timesSurvived++
+          agg.captures += r.captures ?? 0
+          agg.catchPctSum += r.catchPctSum ?? 0
+          agg.exposures += r.exposures ?? 0
+          agg.distanceM += r.distanceM ?? 0
+        }
+      }
+      return [...byName.values()]
+        .map(({ survivedPcts, catchPctSum, captures, ...a }) => ({
+          ...a,
+          captures,
+          avgSurvivedPct: survivedPcts.length
+            ? survivedPcts.reduce((s, p) => s + p, 0) / survivedPcts.length
+            : null,
+          avgCatchPct: captures > 0 ? catchPctSum / captures : null,
+        }))
+        .sort((a, b) => b.wins - a.wins || b.matches - a.matches)
+        .slice(0, limit)
+    },
+    async playerStats(name) {
+      const key = String(name ?? '').trim().toLowerCase()
+      const rows = []
+      for (const [matchId, list] of this.statsByMatch) {
+        const match = this.matches.get(matchId) ?? {}
+        for (const r of list) {
+          if (String(r.name ?? '').trim().toLowerCase() !== key) continue
+          rows.push({
+            id: matchId,
+            lobbyCode: match.lobbyCode,
+            startedAt: match.startedAt,
+            winner: match.winner,
+            role: r.role,
+            captured: r.captured,
+            survived: r.survived,
+            won: r.won,
+            captures: r.captures,
+            exposures: r.exposures,
+            distanceM: r.distanceM,
+          })
+        }
+      }
+      if (!rows.length) return null
+      const stats = rows.reduce(
+        (a, r) => {
+          a.matches++
+          if (r.won) a.wins++
+          if (r.role === 'hider') {
+            a.hiderMatches++
+            a.survivedPcts.push(r.survivedPct ?? 0)
+          } else {
+            a.hunterMatches++
+          }
+          if (r.role === 'hider' && r.captured) a.timesCaught++
+          if (r.role === 'hider' && r.survived) a.timesSurvived++
+          a.captures += r.captures ?? 0
+          a.catchPctSum += r.catchPctSum ?? 0
+          a.exposures += r.exposures ?? 0
+          a.distanceM += r.distanceM ?? 0
+          return a
+        },
+        {
+          matches: 0,
+          wins: 0,
+          hiderMatches: 0,
+          hunterMatches: 0,
+          timesCaught: 0,
+          timesSurvived: 0,
+          captures: 0,
+          catchPctSum: 0,
+          exposures: 0,
+          distanceM: 0,
+          survivedPcts: [],
+        },
+      )
+      const { survivedPcts, catchPctSum, captures, ...rest } = stats
+      return {
+        name: rows[0].name ?? key,
+        stats: {
+          ...rest,
+          captures,
+          avgSurvivedPct: survivedPcts.length
+            ? survivedPcts.reduce((s, p) => s + p, 0) / survivedPcts.length
+            : null,
+          avgCatchPct: captures > 0 ? catchPctSum / captures : null,
+        },
+        matches: rows.sort((a, b) => b.startedAt - a.startedAt),
+      }
     },
     async listMatches({ limit = 100 } = {}) {
       return [...this.matches.values()]
@@ -1077,6 +1208,53 @@ function memoryStore() {
 
 // Disabled replay (no DATABASE_URL): pure passthrough, the game server is
 // untouched.
+
+// ---- player stats derivation (pure, synthetic stream over 100 s of match)
+
+{
+  const ev = (ms, event, payload) => ({ at: new Date(ms).toISOString(), event, payload })
+  const events = [
+    ev(0, 'room:state_changed', {
+      roomState: {
+        status: 'active',
+        players: {
+          h: { id: 'h', name: 'Hank', role: 'hunter' },
+          a: { id: 'a', name: 'Anna', role: 'hider' },
+          b: { id: 'b', name: 'Ben', role: 'hider' },
+        },
+      },
+    }),
+    ev(10_000, 'player:location', { playerId: 'a', lat: 52, lng: 13 }),
+    ev(20_000, 'player:location', { playerId: 'a', lat: 52.001, lng: 13 }),
+    ev(30_000, 'map:hider_positions', [
+      { id: 'a', isExposedLive: true },
+      { id: 'b', isExposedLive: false },
+    ]),
+    ev(40_000, 'room:state_changed', {
+      roomState: { players: { a: { id: 'a', name: 'Anna', role: 'hider', captured: true, capturedBy: 'h', capturedReason: 'reported' } } },
+    }),
+    ev(60_000, 'map:hider_positions', [
+      { id: 'a', isExposedLive: false },
+      { id: 'b', isExposedLive: true },
+    ]),
+    ev(70_000, 'room:state_changed', {
+      roomState: { players: { b: { id: 'b', name: 'Ben', role: 'hider', captured: true, capturedBy: 'h', capturedReason: 'reported' } } },
+    }),
+    ev(100_000, 'game:over', { winner: 'hunters', reason: 'Alle Verstecker gefangen' }),
+  ]
+  const rows = summarizePlayers(events)
+  const byId = Object.fromEntries(rows.map((r) => [r.id ?? r.playerId, r]))
+  const anna = rows.find((r) => r.name === 'Anna')
+  const ben = rows.find((r) => r.name === 'Ben')
+  const hank = rows.find((r) => r.name === 'Hank')
+  assert(anna?.captured && anna?.capturedReason === 'reported' && anna?.survivedPct === 40, 'stats: hider survival % = capture moment / match time', JSON.stringify(anna))
+  assert(anna?.exposures === 1, 'stats: exposure counted once across flag flips')
+  assert(ben?.survivedPct === 70 && ben?.exposures === 1, 'stats: second hider survival %')
+  assert(hank?.captures === 2 && hank?.catchPctSum === 110, 'stats: hunter catch % sums per catch (40 + 70)', JSON.stringify(hank))
+  assert(hank?.survivedPct === 0, 'stats: no survival % for hunters')
+  assert(anna?.fixCount === 2 && anna?.distanceM > 100 && anna?.distanceM < 120, 'stats: distance summed over consecutive fixes')
+}
+
 const noOp = createReplayService({ store: null })
 assert(noOp.enabled === false, 'replay: disabled without a store')
 assert(noOp.wrapIo(fakeIo) === fakeIo, 'replay: disabled → io passes through unwrapped')
@@ -1171,6 +1349,47 @@ assert(rrDone.endedAt && rrDone.eventCount === 9, 'replay: end date + event coun
 wrapped.to('RR').emit('game:tick', { timeRemaining: 0 })
 assert((mem.events.get(rrMatch.id) ?? []).length === 9, 'replay: nothing is logged after the match ended')
 
+// Player stats derived at seal time: roles, win, exposure flips, GPS distance.
+const rrStats = mem.statsByMatch.get(rrMatch.id) ?? []
+assert(rrStats.length === 2, 'replay: player stats stored for every player', JSON.stringify(rrStats))
+const eva = rrStats.find((p) => p.name === 'Eva')
+const ina = rrStats.find((p) => p.name === 'Ina')
+assert(eva?.role === 'hunter' && eva?.won === true, 'replay: winning hunter flagged', JSON.stringify(eva))
+assert(
+  ina?.role === 'hider' && ina?.captured === false && ina?.survived === true && ina?.won === false,
+  'replay: surviving hider on the losing side',
+)
+assert(ina?.exposures === 1, 'replay: exposure flip counted exactly once', String(ina?.exposures))
+assert(ina?.survivedPct >= 0 && ina?.survivedPct <= 100, 'replay: hider survival % in range', String(ina?.survivedPct))
+assert(eva?.survivedPct === 0 && eva?.catchPctSum === 0, 'replay: hunter without catches has no catch %')
+assert(ina?.fixCount === 1 && ina?.distanceM === 0, 'replay: fix count + distance from the GPS log')
+assert(eva?.fixCount === 0 && eva?.distanceM === 0 && eva?.exposures === 0, 'replay: no fixes → no distance')
+
+// Boot backfill: a match recorded before the stats table gets its stats.
+const oldId = '00000000-0000-4000-8000-00000000aaaa'
+mem.matches.set(oldId, {
+  id: oldId,
+  lobbyCode: 'OLD',
+  startedAt: new Date(),
+  endedAt: new Date(),
+  winner: 'hiders',
+  reason: 'r',
+  eventCount: 2,
+  settings: {},
+  players: [],
+})
+mem.events.set(oldId, [
+  { seq: 1, at: new Date(), event: 'room:state_changed', payload: { roomState: { status: 'active', players: { x1: { id: 'x1', name: 'Xenia', role: 'hider' } } } } },
+  { seq: 2, at: new Date(), event: 'game:over', payload: { winner: 'hiders', reason: 'r' } },
+])
+await svc.backfillStats()
+const oldStats = mem.statsByMatch.get(oldId) ?? []
+assert(
+  oldStats.length === 1 && oldStats[0].name === 'Xenia' && oldStats[0].won === true && oldStats[0].survived === true,
+  'replay: boot backfill derives stats for pre-stats matches',
+  JSON.stringify(oldStats),
+)
+
 // ------------------------------------------------------- replay REST (e2e)
 
 // Full pipeline through a real server: sockets play a compact match, the
@@ -1258,6 +1477,39 @@ assert(overEvent.payload.winner === 'hunters', 'replay e2e: game:over result in 
 assert((await fetch(`${REPLAY_URL}/api/matches/${listed.id.slice(0, 8)}`)).status === 404, 'replay e2e: malformed id → 404')
 const randomUuid = '00000000-0000-4000-8000-000000000000'
 assert((await fetch(`${REPLAY_URL}/api/matches/${randomUuid}`)).status === 404, 'replay e2e: unknown id → 404')
+
+// Leaderboard + player stats over the played match (Eva caught Ina).
+const lbRes = await fetch(`${REPLAY_URL}/api/leaderboard`)
+const { leaderboard: lb } = await lbRes.json()
+assert(lbRes.status === 200 && lb.length === 2, 'replay e2e: leaderboard lists both players', JSON.stringify(lb))
+const evaLb = lb.find((p) => p.name === 'Eva')
+const inaLb = lb.find((p) => p.name === 'Ina')
+assert(
+  evaLb?.wins === 1 && evaLb?.hunterMatches === 1 && evaLb?.captures === 1,
+  'replay e2e: hunter credited with the reported capture',
+  JSON.stringify(evaLb),
+)
+assert(
+  inaLb?.timesCaught === 1 && inaLb?.hiderMatches === 1 && inaLb?.wins === 0,
+  'replay e2e: caught hider stats',
+  JSON.stringify(inaLb),
+)
+assert(
+  inaLb?.avgSurvivedPct > 0 &&
+    inaLb?.avgSurvivedPct <= 100 &&
+    evaLb?.avgCatchPct > 0 &&
+    evaLb?.avgCatchPct <= 100,
+  'replay e2e: time-based percentages in range (caught at the end of a short match)',
+  JSON.stringify({ ina: inaLb?.avgSurvivedPct, eva: evaLb?.avgCatchPct }),
+)
+const playerRes = await fetch(`${REPLAY_URL}/api/players/ina`) // case-insensitive lookup
+const playerBody = await playerRes.json()
+assert(
+  playerRes.status === 200 && playerBody?.stats?.matches === 1 && playerBody?.matches?.length === 1 && playerBody.matches[0].captured === true,
+  'replay e2e: player page aggregates by name, lists the match',
+  JSON.stringify(playerBody),
+)
+assert((await fetch(`${REPLAY_URL}/api/players/${encodeURIComponent('Nobody')}`)).status === 404, 'replay e2e: unknown player → 404')
 
 hostR.disconnect()
 hiderR.disconnect()

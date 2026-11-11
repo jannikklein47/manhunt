@@ -21,12 +21,14 @@ manhunt/
 │   │   ├── rooms.js    # Room registry & game engine (timers, zones, proximity)
 │   │   ├── settings.js # Settings schema: defaults + clamping ranges
 │   │   └── replay/     # Match replay module (decoupled, see below)
+│   │       └── stats.js # Per-player stats derived from the event log
 │   └── test/smoke.mjs  # End-to-end engine test over real sockets
 └── frontend/           # Quasar SPA
     └── src/
         ├── components/ # GameMap.vue (Leaflet), SettingsPanel.vue (host config)
         ├── pages/      # IndexPage (home), CreatePage (host setup), RoomPage (game),
-        │               # ReplaysPage (match list), ReplayPage (playback viewer)
+        │               # ReplaysPage (match list), ReplayPage (playback viewer),
+        │               # LeaderboardPage, PlayerStatsPage
         ├── services/   # socket, audio (Web Audio API), geo, wakeLock, settingsSchema,
         │               # api (replay REST), replay (timeline builder)
         └── stores/     # Pinia game store (socket wiring, beep loop, GPS)
@@ -158,8 +160,17 @@ Every played match is recorded into PostgreSQL as an **event log** and can be wa
 - **Recording** — a self-contained module (`backend/src/replay/`) that is fully **decoupled from the game logic**: `rooms.js` has no knowledge of it. The composition root (`index.js`) hands rooms a wrapped `io` whose broadcasts are mirrored into the log, and forwards accepted GPS fixes. Match lifecycle is detected from the stream itself: the first `room:state_changed` with status "active" opens a match, `game:over` seals it. A match is saved with its **id** (uuid), **lobby code**, **date** (start/end), result, plus snapshots of the settings and the roster.
 - **What is logged** — everything the game emits, verbatim: every room broadcast (`game:tick` with zone/preview/countdowns, `room:state_changed` with the full state, reveal events, `game:over`, …), every socket-scoped emission (per-hider proximity alerts, role-filtered `map:hider_positions`/`map:hunter_positions` lists, …) and the inbound `player:location` fixes of every player (the replay is "all-seeing": it shows where everyone actually was, not what each role could see). Nothing is filtered by usefulness — events no viewer consumes today stay in the log for future analysis. Each event carries a gapless per-match sequence number and a timestamp. Socket-scoped events that reach several sockets in identical copies (role fan-out) are collapsed into one row until their payload changes.
 - **Robustness by contract** — the replay must never break a game: writes are buffered in memory, flushed in ordered batches every second and retried when the database is down; a match that dies silently (server restart) is sealed after 15 quiet minutes. Without `DATABASE_URL` set, the module is a pure passthrough and the game server behaves exactly as before.
-- **REST API** — `GET /api/matches` (list, newest first) and `GET /api/matches/:id` (match + full event stream). In the Docker deployment reachable under `/backend/api/...`. Always mounted — without a database the endpoints answer `503` with a clear message instead of failing silently.
+- **REST API** — `GET /api/matches` (list, newest first), `GET /api/matches/:id` (match + full event stream), `GET /api/leaderboard` (per-player stats over all matches) and `GET /api/players/:name` (one player's stats + recent matches). In the Docker deployment reachable under `/backend/api/...`. Always mounted — without a database the endpoints answer `503` with a clear message instead of failing silently.
 - **Viewer** — the home screen's „Replays ansehen“ opens the match list (code, date, duration, result, player/action counts); tapping a match plays it back on the dark Leaflet map: zone circle, pulsating endgame preview, every player's true position with optional track lines, a timeline slider (0 – match length), play/pause and 1×–60× speeds. Pins **glide** smoothly between fixes while playing (jumps on scrubbing and teleports). Event highlights: a hider's **discovery** (reveal/capture) and a hider **outside the zone** (orange pin) pulse with a ring animation — while paused the pulse runs as long as the condition holds (for inspecting the exact second), during playback it lasts 3 real seconds from the event second.
+
+### Leaderboard & player stats
+
+When a match is sealed, the recorder derives **per-player stats from the event stream** (`backend/src/replay/stats.js` — the game logic knows nothing about them): role, win, captured/survived (incl. the **% of match time survived** as a hider), captures (credited to the hunter who reported them; endzone captures credit no one) with the **% of match time per catch** as a hunter, out-of-zone exposures and the distance walked (haversine over the GPS fixes). They land in the `match_players` table; matches recorded before that table existed are backfilled on server boot.
+
+Identity is the **player name** (grouped case-insensitively) — player ids are per-join uuids, so always join with the same handle.
+
+- **Bestenliste** (`/leaderboard`, home-screen button) — ranked by wins: matches, role split, survivals/catches, distance.
+- **Player page** (`/players/:name`) — headline stats (games, wins, win rate, km), role-split chips and the recent matches (each links to its replay). The home screen's „Bestenliste“ jumps straight to your own page using the name from the lobby.
 
 ## GPS accuracy policy
 

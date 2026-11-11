@@ -50,7 +50,10 @@ export function createApp({ replayStore } = {}) {
     resolveSocketRoom: (socketId) => io.sockets.sockets.get(socketId)?.data?.roomCode || null,
   })
   if (store) {
-    store.init().catch((err) => console.error('[replay] schema init failed:', err.message))
+    store
+      .init()
+      .then(() => replay.backfillStats()) // derive stats for pre-stats matches
+      .catch((err) => console.error('[replay] schema init failed:', err.message))
   }
   // Always mounted: without a store the endpoints answer 503 with a clear
   // message (never the SPA fallback's HTML — JSON clients should know why).

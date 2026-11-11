@@ -25,6 +25,7 @@
  * background interval, per recording strictly ordered, with retry.
  */
 import { randomUUID } from 'node:crypto'
+import { summarizePlayers } from './stats.js'
 
 const FLUSH_INTERVAL_MS = 1000
 /** Flush immediately when the buffer passes this size. */
@@ -203,8 +204,36 @@ export function createReplayService({ store, resolveSocketRoom } = {}) {
           eventCount: rec.seq,
         }),
       )
+      .then(() => enqueuePlayerStats(rec))
       .catch((err) => console.error('[replay] match finish failed:', err.message))
     recordings.delete(rec.lobbyCode)
+  }
+
+  /**
+   * Derive this match's player stats from the stored event stream (the DB is
+   * the source of truth — robust even if the in-memory buffer was truncated
+   * during a DB outage) and persist them. Runs after the match row and all
+   * events are written; failures must not break the recording itself.
+   */
+  function enqueuePlayerStats(rec) {
+    return store
+      .getEvents(rec.matchId)
+      .then((events) => store.insertPlayerStats(rec.matchId, summarizePlayers(events)))
+      .catch((err) => console.error('[replay] player stats failed:', err.message))
+  }
+
+  /**
+   * Boot-time backfill: matches recorded before the stats table existed get
+   * their player stats derived now (idempotent — only matches without rows).
+   */
+  async function backfillStats() {
+    try {
+      const ids = await store.matchesWithoutStats()
+      for (const id of ids) await enqueuePlayerStats({ matchId: id })
+      if (ids.length) console.log(`[replay] player stats backfilled for ${ids.length} match(es)`)
+    } catch (err) {
+      console.error('[replay] stats backfill failed:', err.message)
+    }
   }
 
   const flusher = setInterval(() => {
@@ -226,5 +255,5 @@ export function createReplayService({ store, resolveSocketRoom } = {}) {
     await Promise.all([...recordings.values()].map((rec) => enqueueFlush(rec)))
   }
 
-  return { enabled: true, wrapIo, recordFix, flushAll }
+  return { enabled: true, wrapIo, recordFix, flushAll, backfillStats }
 }

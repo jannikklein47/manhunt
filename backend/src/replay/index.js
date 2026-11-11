@@ -8,7 +8,8 @@
  *
  * - `createPgStore(url)`    — persistence (schema + queries)
  * - `createReplayService()` — the recorder (io wrapper + fix intake)
- * - `createReplayRouter()`  — GET /api/matches, GET /api/matches/:id
+ * - `createReplayRouter()`  — GET /api/matches(/:id), /api/leaderboard,
+ *                             /api/players/:name
  *
  * With no DATABASE_URL configured the service is a passthrough: the game
  * server runs exactly as before.

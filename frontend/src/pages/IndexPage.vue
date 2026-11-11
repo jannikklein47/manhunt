@@ -68,6 +68,15 @@
           label="Replays ansehen"
           @click="$router.push('/replays')"
         />
+
+        <q-btn
+          class="full-width"
+          flat
+          no-caps
+          icon="emoji_events"
+          label="Bestenliste"
+          @click="goLeaderboard"
+        />
       </q-card-section>
 
       <q-card-section class="text-caption text-grey-6 q-pt-none">
@@ -162,6 +171,11 @@ function openJoin() {
   unlockAudio()
   joinCode.value = ''
   joinOpen.value = true
+}
+
+/** Leaderboard — always the shared ranking (own stats are one tap away). */
+function goLeaderboard() {
+  router.push('/leaderboard')
 }
 
 async function join() {
