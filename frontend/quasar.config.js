@@ -76,12 +76,17 @@ export default defineConfig((/* ctx */) => {
       // https: true,
       open: true, // opens browser window automatically
 
-      // Proxy the socket connection to the game server (`npm run dev` in backend/).
+      // Proxy the socket connection AND the replay API to the game server
+      // (`npm run dev` in backend/).
       proxy: {
         '/socket.io': {
           target: 'http://localhost:3000',
           changeOrigin: true,
           ws: true,
+        },
+        '/api': {
+          target: 'http://localhost:3000',
+          changeOrigin: true,
         },
       },
     },

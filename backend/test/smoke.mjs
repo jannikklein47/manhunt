@@ -6,6 +6,7 @@
  * Run: `npm test` inside backend/
  */
 import { createApp } from '../src/index.js'
+import { createReplayService } from '../src/replay/index.js'
 import { io } from 'socket.io-client'
 import { applyShrink, applyZoneShift, distanceMeters, Room } from '../src/rooms.js'
 
@@ -1038,6 +1039,229 @@ assert((await noResyncHiders) === false, 'no hider list resync at ended')
 hostC.disconnect()
 hunterC.disconnect()
 hiderC3.disconnect()
+
+// -------------------------------------------------------------- match replay
+
+// In-memory store double with the same interface as the Postgres store —
+// used to test the recorder without a database and to serve the REST API.
+function memoryStore() {
+  return {
+    matches: new Map(),
+    events: new Map(),
+    async init() {},
+    async insertMatch(m) {
+      this.matches.set(m.id, { ...m, endedAt: null, winner: null, reason: null, eventCount: 0 })
+    },
+    async insertEvents(matchId, rows) {
+      const list = this.events.get(matchId) ?? []
+      list.push(...rows.map((r) => ({ ...r })))
+      this.events.set(matchId, list)
+    },
+    async finishMatch(matchId, patch) {
+      const m = this.matches.get(matchId)
+      if (m) Object.assign(m, patch)
+    },
+    async listMatches({ limit = 100 } = {}) {
+      return [...this.matches.values()]
+        .slice(0, limit)
+        .map((m) => ({ ...m, playerCount: (m.players ?? []).length }))
+    },
+    async getMatch(id) {
+      return this.matches.get(id) ?? null
+    },
+    async getEvents(id) {
+      return this.events.get(id) ?? []
+    },
+  }
+}
+
+// Disabled replay (no DATABASE_URL): pure passthrough, the game server is
+// untouched.
+const noOp = createReplayService({ store: null })
+assert(noOp.enabled === false, 'replay: disabled without a store')
+assert(noOp.wrapIo(fakeIo) === fakeIo, 'replay: disabled → io passes through unwrapped')
+noOp.recordFix('RR', 'p1', { lat: 1, lng: 2 })
+assert(true, 'replay: disabled → recordFix is a safe no-op')
+
+// Recorder lifecycle, driven exactly like in production: wrapped io emits
+// the room broadcasts, fixes come in through recordFix.
+const mem = memoryStore()
+const roomsBySocket = new Map([['sock-1', 'RR']])
+const svc = createReplayService({
+  store: mem,
+  resolveSocketRoom: (id) => roomsBySocket.get(id) ?? null,
+})
+assert(svc.enabled === true, 'replay: enabled with a store')
+const rrSent = []
+const wrapped = svc.wrapIo({ to: (t) => ({ emit: (e, p) => rrSent.push({ t, e, p }) }) })
+
+// Lobby broadcasts open no match — the log starts with the game.
+wrapped
+  .to('RR')
+  .emit('room:state_changed', { roomState: { code: 'RR', status: 'lobby', settings: {}, players: {} } })
+assert(mem.matches.size === 0, 'replay: lobby broadcasts open no match')
+assert(rrSent.length === 1, 'replay: emits pass through to the room unchanged')
+
+// First active state broadcast opens the match: id, code, settings, roster.
+const RR_STATE = {
+  code: 'RR',
+  hostId: 'h1',
+  status: 'active',
+  phase: 'main',
+  settings: { gameDurationSeconds: 600, zoneShrinkInterval: 30 },
+  players: {
+    h1: { id: 'h1', name: 'Eva', role: 'hunter' },
+    h2: { id: 'h2', name: 'Ina', role: 'hider' },
+  },
+}
+wrapped.to('RR').emit('room:state_changed', { roomState: RR_STATE })
+await svc.flushAll()
+assert(mem.matches.size === 1, 'replay: the first active broadcast opens the match')
+const rrMatch = [...mem.matches.values()][0]
+assert(rrMatch.lobbyCode === 'RR', 'replay: match saved with its lobby code', JSON.stringify(rrMatch))
+assert(typeof rrMatch.id === 'string' && rrMatch.id.length === 36, 'replay: match saved with a uuid id')
+assert(rrMatch.startedAt instanceof Date || typeof rrMatch.startedAt === 'string', 'replay: match saved with a date')
+assert(rrMatch.settings?.gameDurationSeconds === 600, 'replay: settings snapshot stored')
+assert(rrMatch.players?.length === 2 && rrMatch.players[1].role === 'hider', 'replay: roster snapshot stored')
+
+// Events get a gapless per-match seq in arrival order, including inbound
+// GPS fixes and EVERY socket-scoped action (no whitelist — the log is the
+// full verbatim stream, also of events no viewer consumes today).
+wrapped.to('RR').emit('game:tick', { timeRemaining: 599 })
+svc.recordFix('RR', 'h2', { lat: 52.0, lng: 13.0, accuracy: 8 })
+wrapped.to('sock-1').emit('player:proximity_alert', { inRange: true, interval: 5 })
+wrapped.to('sock-1').emit('map:hider_positions', [{ id: 'h2', isExposedLive: false }])
+wrapped.to('sock-1').emit('map:hunter_positions', [{ id: 'h1' }])
+wrapped.to('OTHER').emit('game:tick', { timeRemaining: 1 }) // another room: no recording
+await svc.flushAll()
+const rrEvents = mem.events.get(rrMatch.id) ?? []
+assert(
+  JSON.stringify(rrEvents.map((e) => e.seq)) === '[1,2,3,4,5,6]',
+  'replay: events logged with gapless seq in arrival order',
+  JSON.stringify(rrEvents.map((e) => e.seq)),
+)
+assert(
+  JSON.stringify(rrEvents.map((e) => e.event)) ===
+    '["room:state_changed","game:tick","player:location","player:proximity_alert","map:hider_positions","map:hunter_positions"]',
+  'replay: fixes and every socket-scoped action ride the log, foreign rooms do not',
+  JSON.stringify(rrEvents.map((e) => e.event)),
+)
+assert(
+  rrEvents[2].payload.playerId === 'h2' && rrEvents[2].payload.lat === 52.0,
+  'replay: location event carries player id and fix',
+)
+assert(rrEvents.every((e) => e.at), 'replay: every event carries a timestamp')
+
+// Role fan-out dedupe: the same payload emitted to N sockets collapses into
+// one row — until the payload changes (an exposure flip, say).
+wrapped.to('sock-1').emit('map:hider_positions', [{ id: 'h2', isExposedLive: false }])
+await svc.flushAll()
+assert((mem.events.get(rrMatch.id) ?? []).length === 6, 'replay: identical scoped fan-out copies collapse')
+wrapped.to('sock-1').emit('map:hider_positions', [{ id: 'h2', isExposedLive: true }])
+await svc.flushAll()
+assert((mem.events.get(rrMatch.id) ?? []).length === 7, 'replay: changed scoped payloads are logged')
+
+// game:over seals the match: result + end date written, log closed.
+wrapped.to('RR').emit('room:state_changed', { roomState: { ...RR_STATE, status: 'ended' } })
+wrapped.to('RR').emit('game:over', { winner: 'hunters', reason: 'Alle Verstecker gefunden' })
+await sleep(100)
+const rrDone = mem.matches.get(rrMatch.id)
+assert(rrDone.winner === 'hunters' && rrDone.reason === 'Alle Verstecker gefunden', 'replay: game:over seals the match with its result')
+assert(rrDone.endedAt && rrDone.eventCount === 9, 'replay: end date + event count written', `count ${rrDone?.eventCount}`)
+wrapped.to('RR').emit('game:tick', { timeRemaining: 0 })
+assert((mem.events.get(rrMatch.id) ?? []).length === 9, 'replay: nothing is logged after the match ended')
+
+// ------------------------------------------------------- replay REST (e2e)
+
+// Full pipeline through a real server: sockets play a compact match, the
+// recorder observes it, the REST API serves it back.
+const replayStore = memoryStore()
+const replayApp = createApp({ replayStore })
+const REPLAY_PORT = 3998
+await new Promise((resolve) => replayApp.httpServer.listen(REPLAY_PORT, resolve))
+const REPLAY_URL = `http://localhost:${REPLAY_PORT}`
+
+const hostR = await new Promise((resolve, reject) => {
+  const s = io(`${REPLAY_URL}/`, { transports: ['websocket'] })
+  s.on('connect', () => resolve(s))
+  s.on('connect_error', reject)
+  setTimeout(() => reject(new Error('replay host connect timeout')), 4000)
+})
+const createdR = await emitAck(hostR, 'room:create', {
+  hostName: 'Eva',
+  role: 'hunter',
+  zoneCenter: ZONE,
+  settings: {
+    gameDurationSeconds: 180,
+    hidePhaseSeconds: 0,
+    initialZoneRadius: 100,
+    zoneShrinkInterval: 600,
+    zoneShrinkPercent: 10,
+    zoneShiftEnabled: false,
+    endgameEnabled: false,
+    hiderRevealInterval: 60,
+    proximityDistanceMeters: 5,
+    proximityBeepInterval: 5,
+  },
+})
+assert(createdR?.ok, 'replay e2e: room created')
+const codeR = createdR.roomState.code
+const hostRId = createdR.yourPlayerId
+const hiderR = await new Promise((resolve, reject) => {
+  const s = io(`${REPLAY_URL}/`, { transports: ['websocket'] })
+  s.on('connect', () => resolve(s))
+  s.on('connect_error', reject)
+  setTimeout(() => reject(new Error('replay hider connect timeout')), 4000)
+})
+const joinedR = await emitAck(hiderR, 'room:join', { roomCode: codeR, playerName: 'Ina', role: 'hider' })
+assert(joinedR?.ok, 'replay e2e: hider joined')
+const hiderRId = joinedR.yourPlayerId
+
+// A lobby fix — before the match, so it must NOT enter the log.
+hiderR.emit('player:location', { lat: 52.0005, lng: 13.0, accuracy: 5 })
+await sleep(150)
+await emitAck(hostR, 'game:start', { roomCode: codeR })
+await once(hiderR, 'game:tick') // main phase is running
+hiderR.emit('player:location', { lat: 51.9995, lng: 13.0, accuracy: 5 }) // in-zone fix
+hiderR.emit('player:location', { lat: 91, lng: 13.0, accuracy: 5 }) // junk — rejected
+await sleep(150)
+// The hider reports being caught by the host — terminal, hunters win.
+// game:over is broadcast before the ack resolves — listen first.
+const gameOverR = once(hiderR, 'game:over')
+await emitAck(hiderR, 'hider:captured', { roomCode: codeR, hiderId: hiderRId, hunterId: hostRId })
+await gameOverR
+await sleep(300) // let the recorder flush + seal
+
+const listRes = await fetch(`${REPLAY_URL}/api/matches`)
+const listBody = await listRes.json()
+assert(listRes.status === 200 && listBody.matches?.length === 1, 'replay e2e: exactly one match listed', JSON.stringify(listBody).slice(0, 200))
+const listed = listBody.matches[0]
+assert(listed.lobbyCode === codeR, 'replay e2e: listed under its lobby code')
+assert(listed.winner === 'hunters' && listed.playerCount === 2, 'replay e2e: result + player count listed')
+
+const matchRes = await fetch(`${REPLAY_URL}/api/matches/${listed.id}`)
+const { match: fetchedMatch, events: logged } = await matchRes.json()
+assert(matchRes.status === 200 && fetchedMatch?.id === listed.id, 'replay e2e: match fetched by id')
+assert(fetchedMatch.settings?.gameDurationSeconds === 180, 'replay e2e: settings snapshot delivered')
+const kinds = logged.map((e) => e.event)
+assert(kinds[0] === 'room:state_changed' && kinds.at(-1) === 'game:over', 'replay e2e: log runs from the active state to game:over', JSON.stringify(kinds))
+assert(logged.every((e, i) => i === 0 || e.seq > logged[i - 1].seq), 'replay e2e: seq strictly increasing')
+const loggedFixes = logged.filter((e) => e.event === 'player:location')
+assert(
+  loggedFixes.length === 1 && loggedFixes[0].payload.playerId === hiderRId && loggedFixes[0].payload.lat === 51.9995,
+  'replay e2e: exactly the one accepted in-match fix is logged',
+  JSON.stringify(loggedFixes.map((f) => f.payload)),
+)
+const overEvent = logged.at(-1)
+assert(overEvent.payload.winner === 'hunters', 'replay e2e: game:over result in the log')
+
+assert((await fetch(`${REPLAY_URL}/api/matches/${listed.id.slice(0, 8)}`)).status === 404, 'replay e2e: malformed id → 404')
+const randomUuid = '00000000-0000-4000-8000-000000000000'
+assert((await fetch(`${REPLAY_URL}/api/matches/${randomUuid}`)).status === 404, 'replay e2e: unknown id → 404')
+
+hostR.disconnect()
+hiderR.disconnect()
+replayApp.httpServer.close()
 
 // ---------------------------------------------------------------- teardown
 

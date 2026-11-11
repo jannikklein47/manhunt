@@ -8,6 +8,7 @@ A full-stack, mobile-first hide & seek game that runs entirely in mobile browser
 | --------- | ----------------------------------------------------------- |
 | Frontend  | Quasar (Vue 3 Composition API + Pinia), Leaflet dark tiles  |
 | Backend   | Node.js, Express, Socket.io                                 |
+| Database  | PostgreSQL (match replays, event log)                       |
 | Geospatial | `@turf/turf` (distance / zone membership on the server)    |
 
 ## Project structure
@@ -18,13 +19,16 @@ manhunt/
 │   ├── src/
 │   │   ├── index.js    # HTTP + WebSocket wiring, serves the built SPA
 │   │   ├── rooms.js    # Room registry & game engine (timers, zones, proximity)
-│   │   └── settings.js # Settings schema: defaults + clamping ranges
+│   │   ├── settings.js # Settings schema: defaults + clamping ranges
+│   │   └── replay/     # Match replay module (decoupled, see below)
 │   └── test/smoke.mjs  # End-to-end engine test over real sockets
 └── frontend/           # Quasar SPA
     └── src/
         ├── components/ # GameMap.vue (Leaflet), SettingsPanel.vue (host config)
-        ├── pages/      # IndexPage (home), CreatePage (host setup), RoomPage (game)
-        ├── services/   # socket, audio (Web Audio API), geo, wakeLock, settingsSchema
+        ├── pages/      # IndexPage (home), CreatePage (host setup), RoomPage (game),
+        │               # ReplaysPage (match list), ReplayPage (playback viewer)
+        ├── services/   # socket, audio (Web Audio API), geo, wakeLock, settingsSchema,
+        │               # api (replay REST), replay (timeline builder)
         └── stores/     # Pinia game store (socket wiring, beep loop, GPS)
 ```
 
@@ -40,7 +44,14 @@ cd backend && npm install && npm run dev
 cd frontend && npm install && npm run dev
 ```
 
-The Quasar dev server proxies `/socket.io` to the game server, so the app talks to a single origin.
+The Quasar dev server proxies `/socket.io` and `/api` (replays) to the game server, so the app talks to a single origin. Replays need a database: start one and point the backend at it. The backend runs on your host here, so the DB needs one host port — but bind it to loopback, so it is reachable only from your machine, not your network:
+
+```bash
+docker run -d --rm --name manhunt-db -e POSTGRES_USER=manhunt -e POSTGRES_PASSWORD=manhunt -e POSTGRES_DB=manhunt -p 127.0.0.1:5433:5432 postgres:17-alpine
+DATABASE_URL=postgres://manhunt:manhunt@localhost:5433/manhunt npm run dev
+```
+
+Without `DATABASE_URL` the game server simply records nothing.
 
 ### Production
 
@@ -61,6 +72,18 @@ Single origin — everything runs behind nginx on port 4000:
 | ------------------------ | -------------------------------------- |
 | SPA (frontend)           | `https://batterysync.de:4000/`         |
 | Game server API/sockets  | `https://batterysync.de:4000/backend/` |
+
+The stack is three containers: nginx (frontend), the game server (backend) and
+a PostgreSQL database that stores the match replays (data volume
+`manhunt-pgdata` survives `docker compose down`). The backend waits for the
+DB healthcheck (`depends_on: service_healthy`) and creates its schema on boot.
+
+The database is fully isolated: it publishes no port and sits on a dedicated
+`internal: true` Docker network (`manhunt_db-internal`) — Docker gives that
+network no route to the outside world, so the DB is unreachable from the
+host, the internet and every other container; only the backend can open a
+connection to it. The only externally published port of the whole stack is
+nginx's `4000`.
 
 nginx (alpine) terminates TLS, serves the built SPA and proxies `/backend/` to
 the game server container over the internal network — the backend is **not**
@@ -127,6 +150,16 @@ All timers on the server derive from these settings — no hardcoded magic numbe
 - **Proximity alert** — on every accepted GPS fix the server evaluates `@turf/distance(hider, hunter)`. When a hunter comes within `proximityDistanceMeters`, the hider's client plays a 1000 Hz square-wave beep (400 ms, Web Audio API) immediately and repeats it every `proximityBeepInterval` seconds until the hunter leaves the radius.
 - **Win conditions** — hunters win when every hider taps the report-capture button („Ich wurde gefunden — Fang melden“, then picking the hunter in the „Wer hat dich gefunden?“ dialog), fails to reach the announced endgame zone before the switch, or is caught during the endgame; hiders win when the (endgame) timer hits zero with at least one hider uncaught. With the endgame disabled, the match still ends at time-up exactly as before.
 - **Seamless rejoin** — a dropped connection (network glitch, tunnel, mobile radio sleep) or a browser refresh never costs a player their session: the server keeps the player entry and re-binds the returning client to it — same player id, same role (a rejoining client sends no role, so a stale local one can never flip it), same captured/exposure state. Every successful join triggers a **resync**: the room state plus the position lists for the player's own role (hunters in the hiding phase still get nothing) and the current proximity state, so a hider mid-beep resumes instantly. When the game has already ended, the rejoined client gets the final winner/reason in room state instead of any position lists. The client auto-rejoins transparently whenever socket.io reconnects while a room is open; if the room is gone (empty-room cleanup, server restart), the app fails cleanly back to the home screen.
+
+## Match replay
+
+Every played match is recorded into PostgreSQL as an **event log** and can be watched afterwards.
+
+- **Recording** — a self-contained module (`backend/src/replay/`) that is fully **decoupled from the game logic**: `rooms.js` has no knowledge of it. The composition root (`index.js`) hands rooms a wrapped `io` whose broadcasts are mirrored into the log, and forwards accepted GPS fixes. Match lifecycle is detected from the stream itself: the first `room:state_changed` with status "active" opens a match, `game:over` seals it. A match is saved with its **id** (uuid), **lobby code**, **date** (start/end), result, plus snapshots of the settings and the roster.
+- **What is logged** — everything the game emits, verbatim: every room broadcast (`game:tick` with zone/preview/countdowns, `room:state_changed` with the full state, reveal events, `game:over`, …), every socket-scoped emission (per-hider proximity alerts, role-filtered `map:hider_positions`/`map:hunter_positions` lists, …) and the inbound `player:location` fixes of every player (the replay is "all-seeing": it shows where everyone actually was, not what each role could see). Nothing is filtered by usefulness — events no viewer consumes today stay in the log for future analysis. Each event carries a gapless per-match sequence number and a timestamp. Socket-scoped events that reach several sockets in identical copies (role fan-out) are collapsed into one row until their payload changes.
+- **Robustness by contract** — the replay must never break a game: writes are buffered in memory, flushed in ordered batches every second and retried when the database is down; a match that dies silently (server restart) is sealed after 15 quiet minutes. Without `DATABASE_URL` set, the module is a pure passthrough and the game server behaves exactly as before.
+- **REST API** — `GET /api/matches` (list, newest first) and `GET /api/matches/:id` (match + full event stream). In the Docker deployment reachable under `/backend/api/...`. Always mounted — without a database the endpoints answer `503` with a clear message instead of failing silently.
+- **Viewer** — the home screen's „Replays ansehen“ opens the match list (code, date, duration, result, player/action counts); tapping a match plays it back on the dark Leaflet map: zone circle, pulsating endgame preview, every player's true position with optional track lines, a timeline slider (0 – match length), play/pause and 1×–60× speeds. Pins **glide** smoothly between fixes while playing (jumps on scrubbing and teleports). Event highlights: a hider's **discovery** (reveal/capture) and a hider **outside the zone** (orange pin) pulse with a ring animation — while paused the pulse runs as long as the condition holds (for inspecting the exact second), during playback it lasts 3 real seconds from the event second.
 
 ## GPS accuracy policy
 

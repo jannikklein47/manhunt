@@ -59,6 +59,15 @@
           :disable="!playerName.trim()"
           @click="openJoin"
         />
+
+        <q-btn
+          class="full-width"
+          flat
+          no-caps
+          icon="movie"
+          label="Replays ansehen"
+          @click="$router.push('/replays')"
+        />
       </q-card-section>
 
       <q-card-section class="text-caption text-grey-6 q-pt-none">

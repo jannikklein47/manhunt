@@ -785,10 +785,15 @@ export class Room {
 
   // ------------------------------------------------------------- location
 
+  /**
+   * Ingest a GPS fix. Returns true when the fix was accepted (valid, fresh
+   * enough and from an eligible player) — the replay recorder logs exactly
+   * those; false for rejected junk.
+   */
   handleLocation(player, { lat, lng, accuracy } = {}) {
-    if (!isValidFix({ lat, lng, accuracy })) return
+    if (!isValidFix({ lat, lng, accuracy })) return false
     const acc = typeof accuracy === 'number' ? accuracy : 0
-    if (acc > GPS_MAX_REPORT) return // junk fix (city-level) — ignore
+    if (acc > GPS_MAX_REPORT) return false // junk fix (city-level) — ignore
 
     // LOBBY: no game mechanics — but everyone sees everyone, so every
     // accepted fix rebroadcasts both roles to the whole room.
@@ -796,11 +801,11 @@ export class Room {
       player.lastLocation = { lat, lng, accuracy: acc, at: Date.now(), quality: acc <= GPS_QUALITY_MAX }
       this.broadcastHunterPositions()
       this.io.to(this.code).emit('map:hider_positions', this.hiderListPayload())
-      return
+      return true
     }
 
-    if (this.status !== 'active') return
-    if (player.captured) return
+    if (this.status !== 'active') return false
+    if (player.captured) return false
 
     player.lastLocation = { lat, lng, accuracy: acc, at: Date.now(), quality: acc <= GPS_QUALITY_MAX }
 
@@ -815,6 +820,7 @@ export class Room {
       this.broadcastHunterPositions()
     }
     this.evaluateProximity()
+    return true
   }
 
   /**

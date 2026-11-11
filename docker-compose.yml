@@ -15,7 +15,37 @@
 
 name: manhunt
 
+networks:
+  # External-facing network: nginx publishes its TLS port here and proxies
+  # to the backend over it.
+  web:
+  # Database island: `internal: true` — Docker gives this network NO route
+  # to the outside world. The DB is unreachable from the host, the internet
+  # and even its containers cannot dial out; only backend ↔ db inside it.
+  db-internal:
+    internal: true
+
 services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    # Match replay storage (event log). Fully isolated: no published port
+    # AND no external route (db-internal is an internal-only network) —
+    # only the game server can open a connection to it.
+    environment:
+      POSTGRES_USER: manhunt
+      POSTGRES_PASSWORD: manhunt
+      POSTGRES_DB: manhunt
+    volumes:
+      - manhunt-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U manhunt -d manhunt']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    networks:
+      - db-internal
+
   backend:
     build: ./backend
     image: manhunt-backend
@@ -25,6 +55,17 @@ services:
       - '3001'
     environment:
       PORT: 3001
+      # Replay recording: the backend writes the match event log here
+      # (schema is created automatically on boot).
+      DATABASE_URL: postgres://manhunt:manhunt@db:5432/manhunt
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      # web: so the nginx frontend can proxy /backend/ to this container.
+      # db-internal: the ONLY way to the database.
+      - web
+      - db-internal
 
   frontend:
     build:
@@ -45,3 +86,8 @@ services:
       - '4000:443'
     volumes:
       - /home/ubuntu/ssl/batterysync:/etc/manhunt/ssl:ro
+    networks:
+      - web
+
+volumes:
+  manhunt-pgdata:

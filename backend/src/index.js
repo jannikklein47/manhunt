@@ -15,12 +15,22 @@ import { Server } from 'socket.io'
 
 import { GameError, Room, createRoom, getRoom, rooms } from './rooms.js'
 import { readSslCredentials } from './ssl.js'
+import { createPgStore, createReplayRouter, createReplayService } from './replay/index.js'
+
+// Optional local config (DATABASE_URL for the replay DB, PORT, …): a
+// backend/.env file is loaded when present. Variables already set in the
+// shell keep precedence.
+try {
+  process.loadEnvFile(path.join(path.dirname(fileURLToPath(import.meta.url)), '../.env'))
+} catch {
+  // no .env file — everything comes from the real environment
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const PORT = Number(process.env.PORT || 3000)
 const DIST_DIR = path.resolve(__dirname, '../../frontend/dist/spa')
 
-export function createApp() {
+export function createApp({ replayStore } = {}) {
   const app = express()
   // HTTPS when an SSL pair is configured (deployment), HTTP otherwise (dev).
   const ssl = readSslCredentials()
@@ -30,6 +40,24 @@ export function createApp() {
   const io = new Server(httpServer, {
     cors: { origin: process.env.CORS_ORIGIN || true },
   })
+
+  // ------------------------------------------------------------- replay
+  // Match recording + REST read API. Enabled with DATABASE_URL (or an
+  // injected store in tests); without it the game server is unchanged.
+  const store = replayStore || (process.env.DATABASE_URL ? createPgStore(process.env.DATABASE_URL) : null)
+  const replay = createReplayService({
+    store,
+    resolveSocketRoom: (socketId) => io.sockets.sockets.get(socketId)?.data?.roomCode || null,
+  })
+  if (store) {
+    store.init().catch((err) => console.error('[replay] schema init failed:', err.message))
+  }
+  // Always mounted: without a store the endpoints answer 503 with a clear
+  // message (never the SPA fallback's HTML — JSON clients should know why).
+  app.use(createReplayRouter(store))
+  // Rooms receive the observing io — every room broadcast is mirrored into
+  // the event log without the game logic knowing about it.
+  const roomIo = replay.wrapIo(io)
 
   // ------------------------------------------------------------ socket api
 
@@ -64,7 +92,7 @@ export function createApp() {
       try {
         const hostName = String(payload.hostName || '').trim()
         if (!hostName) throw new GameError('Ein Spielername wird benötigt')
-        const room = createRoom(io, {
+        const room = createRoom(roomIo, {
           hostName,
           role: payload.role,
           zoneCenter: payload.zoneCenter,
@@ -174,7 +202,11 @@ export function createApp() {
       try {
         const room = getRoom(roomCode)
         const player = room.players.get(socket.data?.playerId)
-        if (player && player.connected) room.handleLocation(player, payload)
+        if (player && player.connected) {
+          const accepted = room.handleLocation(player, payload)
+          // Replay: only fixes the game actually used enter the event log.
+          if (accepted) replay.recordFix(roomCode, player.id, payload)
+        }
       } catch {
         // Unknown room mid-flight (e.g. deleted): ignore silently.
       }
